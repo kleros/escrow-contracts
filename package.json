@@ -1,0 +1,78 @@
+{
+  "name": "escrow-contracts",
+  "version": "0.1.0",
+  "description": "Smart contracts interacting with Kleros.",
+  "main": "index.js",
+  "author": "Kleros",
+  "license": "MIT",
+  "keywords": [
+    "kleros",
+    "escrow",
+    "arbitration",
+    "arbitrable",
+    "arbitrator"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kleros/matransaction-contracts.git"
+  },
+  "private": false,
+  "files": [
+    "contracts",
+    "build"
+  ],
+  "scripts": {
+    "build": "run-s -s build:4 build:7",
+    "build:7": "buidler compile",
+    "build:4": "buidler compile --config buidler.config.4.js",
+    "clean": "buidler clean",
+    "prettify": "kathari prettify",
+    "lint:sol": "kathari lint:sol",
+    "lint:js": "kathari lint:js",
+    "lint": "yarn run lint:sol && yarn run lint:js",
+    "b:test": "buidler test",
+    "pretest": "run-s -s build",
+    "test": "mocha --timeout 10000 -r @nomiclabs/buidler/register",
+    "pretest:watch": "run-s -s build",
+    "test:watch": "mocha -r @nomiclabs/buidler/register --watch-files '**/*.js,**/*.sol' --watch",
+    "cz": "kathari cz"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "kathari precommit",
+      "commit-msg": "kathari commitmsg"
+    }
+  },
+  "devDependencies": {
+    "@kleros/erc-792": "^6.0.0",
+    "@kleros/ethereum-libraries": "^2.0.1",
+    "@kleros/kathari": "^0.13.3",
+    "@kleros/kleros-interaction": "^0.10.0",
+    "@nomiclabs/buidler": "^1.4.7",
+    "@nomiclabs/buidler-ethers": "^2.0.0",
+    "@nomiclabs/buidler-waffle": "^2.1.0",
+    "@nomiclabs/buidler-web3": "^1.3.4",
+    "@openzeppelin/test-helpers": "^0.5.6",
+    "chai": "^4.2.0",
+    "coveralls": "^3.0.2",
+    "ethereum-waffle": "^3.1.0",
+    "ethers": "^5.0.14",
+    "ganache-cli": "^6.3.0",
+    "husky": "^1.3.1",
+    "npm-run-all": "^4.1.5",
+    "pify": "^4.0.1",
+    "standard-version": "^4.4.0",
+    "web3": "^1.3.0"
+  },
+  "dependencies": {
+    "@kleros/kleros": "^0.1.2",
+    "@openzeppelin/contracts": "^3.2.1-solc-0.7",
+    "lint-staged": "^7.3.0",
+    "openzeppelin-solidity": "^1.12.0"
+  }
+}
