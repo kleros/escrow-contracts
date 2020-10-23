@@ -40,6 +40,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
   let senderAddress
   let receiverAddress
 
+  let contractArtifact
   let contract
   let MULTIPLIER_DIVISOR
   let currentTime
@@ -83,7 +84,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     token = await ERC20Token.deploy(senderAddress, amount * 10) // (initial account, initial balance)
     await token.deployed()
 
-    const contractArtifact = await readArtifact(
+    contractArtifact = await readArtifact(
       './artifacts/0.7.x',
       'MultipleArbitrableTokenTransactionWithAppeals'
     )
@@ -114,6 +115,17 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     MULTIPLIER_DIVISOR = await contract.MULTIPLIER_DIVISOR()
     currentTime = await latestTime()
+  })
+  describe('Bytecode size estimations', () => {
+    it('Should be smaller than the maximum allowed (24k)', async () => {
+      const bytecode = contractArtifact.bytecode
+      const deployed = contractArtifact.deployedBytecode
+      const sizeOfB  = bytecode.length / 2
+      const sizeOfD  = deployed.length / 2
+      console.log("size of bytecode in bytes = ", sizeOfB)
+      console.log("size of deployed in bytes = ", sizeOfD)
+      expect(sizeOfD).to.be.lessThan(24576)
+    })
   })
 
   describe('Gas costs estimations for single calls', () => {
