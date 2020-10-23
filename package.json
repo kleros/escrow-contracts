@@ -14,7 +14,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kleros/matransaction-contracts.git"
+    "url": "git+https://github.com/kleros/escrow-contracts.git"
   },
   "private": false,
   "files": [
@@ -72,7 +72,6 @@
   "dependencies": {
     "@kleros/kleros": "^0.1.2",
     "@openzeppelin/contracts": "^3.2.1-solc-0.7",
-    "lint-staged": "^7.3.0",
-    "openzeppelin-solidity": "^1.12.0"
+    "lint-staged": "^7.3.0"
   }
 }
