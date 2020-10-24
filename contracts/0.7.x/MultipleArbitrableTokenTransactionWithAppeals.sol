@@ -1,6 +1,6 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0]
- *  @reviewers: []
+ *  @reviewers: [@ferittuncer]
  *  @auditors: []
  *  @bounties: []
  */
@@ -8,7 +8,6 @@
 pragma solidity >=0.7.1;
 pragma experimental ABIEncoderV2;
 
-import "./libraries/SafeCast.sol";
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
@@ -24,14 +23,13 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence {
     
     using CappedMath for uint256;
-    using SafeCast for uint256;
 
     // **************************** //
     // *    Contract variables    * //
     // **************************** //
 
-    uint8 public constant AMOUNT_OF_CHOICES = 2;
-    uint64 public constant MULTIPLIER_DIVISOR = 10000; // Divisor parameter for multipliers.
+    uint256 public constant AMOUNT_OF_CHOICES = 2;
+    uint256 public constant MULTIPLIER_DIVISOR = 10000; // Divisor parameter for multipliers.
 
     enum Party {None, Sender, Receiver}
     enum Status {NoDispute, WaitingSender, WaitingReceiver, DisputeCreated, Resolved}
@@ -63,7 +61,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     struct TransactionDispute {
         bool hasRuling; // Required to differentiate between having no ruling and a RefusedToRule ruling.
         uint128 transactionID; // The transaction ID.
-        uint64 ruling; // The ruling given by the arbitrator.
+        uint8 ruling; // The ruling given by the arbitrator.
     }
 
     IArbitrator public arbitrator; // Address of the arbitrator contract.
@@ -116,6 +114,13 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      */
     event TransactionCreated(uint256 _transactionID, address indexed _sender, address indexed _receiver, ERC20 _token, uint256 _amount);
     
+    /** @dev To be emitted when a transaction is resolved, either by its execution, a timeout or because a ruling was enforced.
+     *  @param _transactionID The ID of the respective transaction.
+     *  @param _reason Short description of what caused the transaction to be solved. 'transaction-executed' | 'timeout-by-sender' | 'timeout-by-receiver' | 'ruling-enforced'
+     *  @param _timestamp When the task was resolved.
+     */
+    event TransactionResolved(uint256 indexed _transactionID, string _reason, uint256 _timestamp);
+
     /** @dev To be emitted when the appeal fees of one of the parties are fully funded.
      *  @param _transactionID The ID of the respective transaction.
      *  @param _party The party that is fully funded.
@@ -263,6 +268,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
         emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, "transaction-executed", block.timestamp);
     }
 
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
@@ -345,6 +351,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         require(_transaction.token.transfer(_transaction.sender, amount), "The `transfer` function must not fail.");
         _transaction.sender.send(senderFee);
         emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, "timeout-by-sender", block.timestamp);
     }
 
     /** @dev Pay receiver if sender fails to pay the fee. UNTRUSTED
@@ -373,6 +380,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _transaction.receiver.send(receiverFee);
 
         emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, "timeout-by-receiver", block.timestamp);
     }
 
     /** @dev Create a dispute. UNTRUSTED.
@@ -387,7 +395,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _transaction.disputeID = arbitrator.createDispute{value: _arbitrationCost}(AMOUNT_OF_CHOICES, arbitratorExtraData);
         roundsByTransactionID[_transactionID].push();
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_transaction.disputeID];
-        transactionDispute.transactionID = _transactionID.toUint128();
+        transactionDispute.transactionID = uint128(_transactionID);
         emit Dispute(arbitrator, _transaction.disputeID, _transactionID, _transactionID);
 
         // Refund sender if it overpaid.
@@ -451,12 +459,12 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         require(!round.hasPaid[uint256(_side)], "Appeal fee has already been paid.");
 
         uint256 appealCost = arbitrator.appealCost(_transaction.disputeID, arbitratorExtraData);
-        uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / uint256(MULTIPLIER_DIVISOR));
+        uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / MULTIPLIER_DIVISOR);
 
         // Take up to the amount necessary to fund the current round at the current costs.
         uint256 contribution; // Amount contributed.
         uint256 remainingETH; // Remaining ETH to send back.
-        (contribution, remainingETH) = calculateContribution(msg.value, totalCost.subCap(round.paidFees[uint(_side)]));
+        (contribution, remainingETH) = calculateContribution(msg.value, totalCost.subCap(round.paidFees[uint256(_side)]));
         round.contributions[msg.sender][uint256(_side)] += contribution;
         round.paidFees[uint256(_side)] += contribution;
         
@@ -562,7 +570,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      */
     function rule(uint256 _disputeID, uint256 _ruling) public override {
         require(msg.sender == address(arbitrator), "The caller must be the arbitrator.");
-        require(_ruling <= uint256(AMOUNT_OF_CHOICES), "Invalid ruling.");
+        require(_ruling <= AMOUNT_OF_CHOICES, "Invalid ruling.");
 
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_disputeID];
         require(transactionDispute.transactionID != 0, "Dispute does not exist.");
@@ -573,11 +581,11 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         
         // If only one side paid its fees we assume the ruling to be in its favor.
         if (round.hasPaid[uint256(Party.Sender)] == true)
-            transactionDispute.ruling = uint64(Party.Sender);
-        else if (round.hasPaid[uint64(Party.Receiver)] == true)
-            transactionDispute.ruling = uint64(Party.Receiver);
+            transactionDispute.ruling = uint8(Party.Sender);
+        else if (round.hasPaid[uint256(Party.Receiver)] == true)
+            transactionDispute.ruling = uint8(Party.Receiver);
         else
-            transactionDispute.ruling = _ruling.toUint64();
+            transactionDispute.ruling = uint8(_ruling);
 
         transactionDispute.hasRuling = true;
         emit Ruling(arbitrator, _disputeID, uint256(transactionDispute.ruling));
@@ -606,10 +614,10 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
 
         // Give the arbitration fee back.
         // Note that we use `send` to prevent a party from blocking the execution.
-        if (transactionDispute.ruling == uint(Party.Sender)) {
+        if (transactionDispute.ruling == uint256(Party.Sender)) {
             _transaction.sender.send(senderFee);
             require(_transaction.token.transfer(_transaction.sender, amount), "The `transfer` function must not fail.");
-        } else if (transactionDispute.ruling == uint(Party.Receiver)) {
+        } else if (transactionDispute.ruling == uint256(Party.Receiver)) {
             _transaction.receiver.send(receiverFee);
             require(_transaction.token.transfer(_transaction.receiver, amount), "The `transfer` function must not fail.");
         } else {
@@ -625,6 +633,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         }
 
         emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, "ruling-enforced", block.timestamp);
     }
 
     // **************************** //

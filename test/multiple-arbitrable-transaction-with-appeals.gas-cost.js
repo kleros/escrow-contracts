@@ -41,8 +41,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   let MULTIPLIER_DIVISOR
   let currentTime
 
-  let expectedContractBalance
-  let expectedTransactionCount
+  let contractArtifact
 
   beforeEach('Setup contracts', async () => {
     ;[
@@ -53,8 +52,6 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       crowdfunder1,
       crowdfunder2
     ] = await ethers.getSigners()
-    expectedContractBalance = 0
-    expectedTransactionCount = 0
 
     const arbitratorArtifact = await readArtifact(
       './artifacts/0.4.x',
@@ -74,7 +71,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     // Make appeals go to the same arbitrator
     await arbitrator.changeArbitrator(arbitrator.address)
 
-    const contractArtifact = await readArtifact(
+    contractArtifact = await readArtifact(
       './artifacts/0.7.x',
       'MultipleArbitrableTransactionWithAppeals'
     )
@@ -90,13 +87,25 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       winnerMultiplier,
       loserMultiplier
     )
-    await contract.deployed()
+    deployedContract = await contract.deployed()
 
     // The first transaction is more expensive, because the hashes array is empty. Skip it to estimate gas costs on normal conditions.
     await createTransactionHelper(amount)
 
     MULTIPLIER_DIVISOR = await contract.MULTIPLIER_DIVISOR()
     currentTime = await latestTime()
+  })
+
+  describe('Bytecode size estimations', () => {
+    it('Should be smaller than the maximum allowed (24k)', async () => {
+      const bytecode = contractArtifact.bytecode
+      const deployed = contractArtifact.deployedBytecode
+      const sizeOfB  = bytecode.length / 2
+      const sizeOfD  = deployed.length / 2
+      console.log("size of bytecode in bytes = ", sizeOfB)
+      console.log("size of deployed in bytes = ", sizeOfD)
+      expect(sizeOfD).to.be.lessThan(24576)
+    })
   })
 
   describe('Gas costs estimations for single calls', () => {
