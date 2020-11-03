@@ -180,14 +180,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         'Invalid last interaction'
       )
       expect(transaction.amount).to.equal(amount, 'Invalid transaction amount')
-      expect(transaction.timeoutPayment).to.equal(
-        timeoutPayment,
-        'Wrong timeoutPayment'
+      expect(transaction.deadline).to.equal(
+        BigNumber.from(timeoutPayment).add(transaction.lastInteraction),
+        'Wrong deadline'
       )
       expect(transaction.disputeID).to.equal(0, 'Invalid dispute ID')
       expect(transaction.senderFee).to.equal(0, 'Invalid senderFee')
       expect(transaction.receiverFee).to.equal(0, 'Invalid receieverFee')
-      expect(transaction.ruling).to.equal(0, 'Invalid ruling')
     })
 
     it('Should store the proper hashed transaction state of the newly created transaction', async () => {
@@ -283,14 +282,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         'Invalid last interaction'
       )
       expect(rTransaction.amount).to.equal(0, 'Invalid transaction amount')
-      expect(rTransaction.timeoutPayment).to.equal(
-        transaction.timeoutPayment,
-        'Wrong timeoutPayment'
+      expect(rTransaction.deadline).to.equal(
+        transaction.deadline,
+        'Wrong deadline'
       )
       expect(rTransaction.disputeID).to.equal(0, 'Invalid dispute ID')
       expect(rTransaction.senderFee).to.equal(0, 'Invalid senderFee')
       expect(rTransaction.receiverFee).to.equal(0, 'Invalid receieverFee')
-      expect(rTransaction.ruling).to.equal(0, 'Invalid ruling')
 
       expect(pTransactionId).to.equal(
         transactionId,
@@ -416,14 +414,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         'Invalid last interaction'
       )
       expect(payTransaction.amount).to.equal(0, 'Invalid transaction amount')
-      expect(payTransaction.timeoutPayment).to.equal(
-        transaction.timeoutPayment,
-        'Wrong timeoutPayment'
+      expect(payTransaction.deadline).to.equal(
+        transaction.deadline,
+        'Wrong deadline'
       )
       expect(payTransaction.disputeID).to.equal(0, 'Invalid dispute ID')
       expect(payTransaction.senderFee).to.equal(0, 'Invalid senderFee')
       expect(payTransaction.receiverFee).to.equal(0, 'Invalid receieverFee')
-      expect(payTransaction.ruling).to.equal(0, 'Invalid ruling')
 
       expect(pTransactionId).to.equal(
         transactionId,
@@ -553,14 +550,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         0,
         'Invalid transaction amount'
       )
-      expect(executeTransaction.timeoutPayment).to.equal(
-        transaction.timeoutPayment,
-        'Wrong timeoutPayment'
+      expect(executeTransaction.deadline).to.equal(
+        transaction.deadline,
+        'Wrong deadline'
       )
       expect(executeTransaction.disputeID).to.equal(0, 'Invalid dispute ID')
       expect(executeTransaction.senderFee).to.equal(0, 'Invalid senderFee')
       expect(executeTransaction.receiverFee).to.equal(0, 'Invalid receieverFee')
-      expect(executeTransaction.ruling).to.equal(0, 'Invalid ruling')
     })
 
     it('Should revert if timeout has not passed', async () => {
@@ -572,7 +568,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
       await expect(
         contract.connect(other).executeTransaction(transactionId, transaction)
-      ).to.be.revertedWith('The timeout has not passed yet.')
+      ).to.be.revertedWith('Deadline not passed.')
     })
 
     it('Should revert withdraws after execute is called', async () => {
@@ -771,9 +767,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         'Invalid last interaction'
       )
       expect(ruleTransaction.amount).to.equal(0, 'Invalid transaction amount')
-      expect(ruleTransaction.timeoutPayment).to.equal(
-        timeoutPayment,
-        'Wrong timeoutPayment'
+      expect(ruleTransaction.deadline).to.equal(
+        transaction.deadline,
+        'Wrong deadline'
       )
       expect(ruleTransaction.disputeID).to.equal(
         disputeID,
@@ -781,10 +777,6 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
       expect(ruleTransaction.senderFee).to.equal(0, 'Invalid senderFee')
       expect(ruleTransaction.receiverFee).to.equal(0, 'Invalid receieverFee')
-      expect(ruleTransaction.ruling).to.equal(
-        DisputeRuling.Sender,
-        'Invalid ruling'
-      )
 
       const updatedHash = await contract.transactionHashes(transactionId - 1)
       const expectedHash = await contract.hashTransactionState(ruleTransaction)
@@ -1327,7 +1319,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx1 = await txPromise1
       const receipt1 = await tx1.wait()
       expect(txPromise1)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Receiver,
@@ -1352,7 +1344,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx2 = await txPromise2
       const receipt2 = await tx2.wait()
       expect(txPromise2)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Sender,
@@ -1468,7 +1460,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx1 = await txPromise1
       const receipt1 = await tx1.wait()
       expect(txPromise1)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Receiver,
@@ -1523,7 +1515,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx2 = await txPromise2
       const receipt2 = await tx2.wait()
       expect(txPromise2)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Receiver,
@@ -1602,7 +1594,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx3 = await txPromise3
       const receipt3 = await tx3.wait()
       expect(txPromise3)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Sender,
@@ -1660,7 +1652,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const tx4 = await txPromise4
       const receipt4 = await tx4.wait()
       expect(txPromise4)
-        .to.emit(contract, 'AppealFeeContribution')
+        .to.emit(contract, 'AppealContribution')
         .withArgs(
           transactionId,
           TransactionParty.Sender,

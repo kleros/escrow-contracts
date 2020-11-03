@@ -42,12 +42,6 @@
       "@commitlint/config-conventional"
     ]
   },
-  "husky": {
-    "hooks": {
-      "pre-commit": "kathari precommit",
-      "commit-msg": "kathari commitmsg"
-    }
-  },
   "devDependencies": {
     "@kleros/erc-792": "^6.0.0",
     "@kleros/ethereum-libraries": "^2.0.1",
@@ -71,7 +65,6 @@
   },
   "dependencies": {
     "@kleros/kleros": "^0.1.2",
-    "@openzeppelin/contracts": "^3.2.1-solc-0.7",
-    "lint-staged": "^7.3.0"
+    "@openzeppelin/contracts": "^3.2.1-solc-0.7"
   }
 }
