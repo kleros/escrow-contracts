@@ -1184,7 +1184,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       ).to.equal(balancesAfter.receiver, 'Wrong receiver balance.')
     })
   })
-
+  
   describe('Appeals', () => {
     it('Should revert funding of appeals when the right conditions are not met', async () => {
       const [
@@ -1221,7 +1221,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
             TransactionParty.Sender,
             { value: 100 }
           )
-      ).to.be.revertedWith('Dispute is not appealable.')
+      ).to.be.revertedWith('The specified dispute is not appealable.')  // EnhancedAppealableArbitrator reverts
 
       // Rule against the receiver
       await giveRulingHelper(disputeID, DisputeRuling.Sender)
@@ -1260,8 +1260,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
       let paidFees
-      let hasPaid
+      let sideFunded
       let feeRewards
+      let appealed
 
       const [
         receipt,
@@ -1272,10 +1273,10 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         disputeID,
         disputeTransactionId,
         disputeTransaction
-      ] = await createDisputeHelper(transactionId, transaction)
+      ] = await createDisputeHelper(transactionId, transaction);
 
       // Round zero must be created but empty
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1291,17 +1292,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         0,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.None,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         false,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        false,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
 
@@ -1353,10 +1350,10 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         )
       expect(txPromise2)
         .to.emit(contract, 'HasPaidAppealFee')
-        .withArgs(transactionId, TransactionParty.Sender)
+        .withArgs(transactionId, TransactionParty.Sender);
 
       // Round zero must be updated correctly
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1372,25 +1369,21 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.None,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         true,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        true,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(
         winnerAppealFee + loserAppealFee - arbitrationFee,
         'Wrong feeRewards'
-      )
+      );
 
       // Round one must be created but empty
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         1
       )
@@ -1406,17 +1399,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         0,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.None,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         false,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        false,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
     })
@@ -1429,8 +1418,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
       const gasPrice = 1000000000
       let paidFees
-      let hasPaid
+      let sideFunded
       let feeRewards
+      let appealed
 
       const [
         receipt,
@@ -1466,9 +1456,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           TransactionParty.Receiver,
           await crowdfunder1.getAddress(),
           contribution1
-        )
+        );
       // Round zero must be updated correctly
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1484,17 +1474,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         contribution1,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.None,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         false,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        false,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
 
@@ -1532,9 +1518,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           .add(BigNumber.from(expectedContribution2))
           .add(receipt2.gasUsed * gasPrice),
         'Contributor was not refunded correctly'
-      )
+      );
       // Round zero must be updated correctly
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1550,20 +1536,16 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.Receiver,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         false,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        true,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(
-        loserAppealFee,
+        0,
         'Wrong feeRewards'
       )
       // The side is fully funded and new contributions must be reverted
@@ -1600,9 +1582,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           TransactionParty.Sender,
           await crowdfunder2.getAddress(),
           contribution3
-        )
+        );
       // Round zero must be updated correctly
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1618,20 +1600,16 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.Receiver,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         false,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        true,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(
-        loserAppealFee,
+        0,
         'Wrong feeRewards'
       )
 
@@ -1669,9 +1647,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           .add(BigNumber.from(expectedContribution4))
           .add(receipt4.gasUsed * gasPrice),
         'Contributor was not refunded correctly'
-      )
+      );
       // Round zero must be updated correctly
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1687,17 +1665,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(hasPaid[TransactionParty.None]).to.be.equal(
-        false,
-        'Wrong hasPaid for party None'
+      expect(sideFunded).to.be.equal(
+        TransactionParty.None,
+        'Wrong sideFunded'
       )
-      expect(hasPaid[TransactionParty.Sender]).to.be.equal(
+      expect(appealed).to.be.equal(
         true,
-        'Wrong hasPaid for party Sender'
-      )
-      expect(hasPaid[TransactionParty.Receiver]).to.be.equal(
-        true,
-        'Wrong hasPaid for party Receiver'
+        'Wrong round info: appealed'
       )
       expect(feeRewards.toNumber()).to.be.equal(
         loserAppealFee + winnerAppealFee - arbitrationFee,
@@ -1752,8 +1726,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
       let paidFees
-      let hasPaid
+      let sideFunded
       let feeRewards
+      let appealed
 
       const [
         receipt,
@@ -1893,8 +1868,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       expect(balancesAfter.sender).to.equal(
         balancesAfter.sender,
         'Non contributors must not be rewarded'
-      )
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      );
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -1922,8 +1897,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
       let paidFees
-      let hasPaid
+      let sideFunded
       let feeRewards
+      let appealed
 
       const [
         receipt,
@@ -2036,8 +2012,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       expect(balancesBefore.sender).to.equal(
         balancesAfter.sender,
         'Non contributors must not be rewarded'
-      )
-      ;[paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      );
+      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )
@@ -2180,7 +2156,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
 
       // In this case all rounds have equal fees and rewards to simplify calculations
-      const [paidFees, hasPaid, feeRewards] = await contract.getRoundInfo(
+      const [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
         transactionId,
         0
       )

@@ -102,8 +102,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const deployed = contractArtifact.deployedBytecode
       const sizeOfB  = bytecode.length / 2
       const sizeOfD  = deployed.length / 2
-      console.log("size of bytecode in bytes = ", sizeOfB)
-      console.log("size of deployed in bytes = ", sizeOfD)
+      console.log("\tsize of bytecode in bytes = ", sizeOfB)
+      console.log("\tsize of deployed in bytes = ", sizeOfD)
       expect(sizeOfD).to.be.lessThan(24576)
     })
   })
@@ -336,7 +336,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         '\tGas used by submitEvidence():  ' + parseInt(receipt.gasUsed)
       )
     })
-
+  
     it('Estimate gas cost when appealing one side (full funding).', async () => {
       const loserAppealFee =
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR

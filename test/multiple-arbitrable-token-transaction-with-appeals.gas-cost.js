@@ -122,8 +122,8 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
       const deployed = contractArtifact.deployedBytecode
       const sizeOfB  = bytecode.length / 2
       const sizeOfD  = deployed.length / 2
-      console.log("size of bytecode in bytes = ", sizeOfB)
-      console.log("size of deployed in bytes = ", sizeOfD)
+      console.log("\tsize of bytecode in bytes = ", sizeOfB)
+      console.log("\tsize of deployed in bytes = ", sizeOfD)
       expect(sizeOfD).to.be.lessThan(24576)
     })
   })
