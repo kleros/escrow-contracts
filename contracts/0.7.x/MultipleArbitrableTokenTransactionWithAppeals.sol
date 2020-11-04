@@ -50,7 +50,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     
     struct Round {
         uint256[3] paidFees; // Tracks the fees paid by each side in this round.
-        bool[3] hasPaid; // True when the side has fully paid its fee. False otherwise.
+        Party sideFunded; // If the round is appealed, i.e. this is not the last round, Party.None means that both sides have paid.
         uint256 feeRewards; // Sum of reimbursable fees and stake rewards available to the parties that made contributions to the side that ultimately wins a dispute.
         mapping(address => uint256[3]) contributions; // Maps contributors to their contributions for each side.
     }
@@ -436,24 +436,25 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     function fundAppeal(uint256 _transactionID, Transaction calldata _transaction, Party _side) public payable onlyValidTransactionCD(_transactionID, _transaction) {
         require(_side == Party.Sender || _side == Party.Receiver, "Wrong party.");
         require(_transaction.status == Status.DisputeCreated, "No dispute to appeal");
-        require(arbitrator.disputeStatus(_transaction.disputeID) == IArbitrator.DisputeStatus.Appealable, "Dispute is not appealable.");
 
         (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(_transaction.disputeID);
         require(block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd, "Funding must be made within the appeal period.");
 
-        uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
         uint256 multiplier;
-        if (winner == uint256(_side)){
-            multiplier = winnerStakeMultiplier;
-        } else if (winner == 0){
-            multiplier = sharedStakeMultiplier;
-        } else {
-            require(block.timestamp - appealPeriodStart < (appealPeriodEnd - appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
-            multiplier = loserStakeMultiplier;
+        {
+            uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
+            if (winner == uint256(_side)){
+                multiplier = winnerStakeMultiplier;
+            } else if (winner == 0){
+                multiplier = sharedStakeMultiplier;
+            } else {
+                require(block.timestamp - appealPeriodStart < (appealPeriodEnd - appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
+                multiplier = loserStakeMultiplier;
+            }
         }
 
         Round storage round = roundsByTransactionID[_transactionID][roundsByTransactionID[_transactionID].length - 1];
-        require(!round.hasPaid[uint256(_side)], "Appeal fee has already been paid.");
+        require(_side != round.sideFunded, "Appeal fee has already been paid.");
 
         uint256 appealCost = arbitrator.appealCost(_transaction.disputeID, arbitratorExtraData);
         uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / MULTIPLIER_DIVISOR);
@@ -467,20 +468,25 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         
         emit AppealContribution(_transactionID, _side, msg.sender, contribution);
         
+        bool createAppeal;
         if (round.paidFees[uint256(_side)] >= totalCost) {
-            round.hasPaid[uint256(_side)] = true;
-            round.feeRewards += round.paidFees[uint256(_side)];
+            if (round.sideFunded == Party.None)
+                round.sideFunded = _side;
+            else
+                createAppeal = true;
             emit HasPaidAppealFee(_transactionID, _side);
         }
 
-        // Reimburse leftover ETH.
-        msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
+        // Reimburse leftover ETH if any.
+        if (remainingETH > 0)
+            msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
 
         // Create an appeal if each side is funded.
-        if (round.hasPaid[uint256(Party.Sender)] && round.hasPaid[uint256(Party.Receiver)]) {
+        if (createAppeal) {
             arbitrator.appeal{value: appealCost}(_transaction.disputeID, arbitratorExtraData);
-            round.feeRewards = round.feeRewards.subCap(appealCost);
+            round.feeRewards = (round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)]).subCap(appealCost);
             roundsByTransactionID[_transactionID].push();
+            round.sideFunded = Party.None;
         }
     }
     
@@ -513,7 +519,9 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     function _withdrawFeesAndRewards(address _beneficiary, uint256 _transactionID, uint256 _round, uint256 _finalRuling) internal returns(uint256 reward) {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         uint256[3] storage contributionTo = round.contributions[_beneficiary];
-        if (!round.hasPaid[uint256(Party.Sender)] || !round.hasPaid[uint256(Party.Receiver)]) {
+        uint256 lastRound = roundsByTransactionID[_transactionID].length - 1;
+
+        if (_round == lastRound) {
             // Allow to reimburse if funding was unsuccessful.
             reward = contributionTo[uint256(Party.Sender)] + contributionTo[uint256(Party.Receiver)];
         } else if (_finalRuling == uint256(Party.None)) {
@@ -585,9 +593,9 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         Round storage round = rounds[rounds.length - 1];
         
         // If only one side paid its fees we assume the ruling to be in its favor.
-        if (round.hasPaid[uint256(Party.Sender)] == true)
+        if (round.sideFunded == Party.Sender)
             transactionDispute.ruling = uint8(Party.Sender);
-        else if (round.hasPaid[uint256(Party.Receiver)] == true)
+        else if (round.sideFunded == Party.Receiver)
             transactionDispute.ruling = uint8(Party.Receiver);
         else
             transactionDispute.ruling = uint8(_ruling);
@@ -661,7 +669,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 totalRounds = rounds.length;
         for (uint256 i = 0; i < totalRounds; i++) {
             Round storage round = rounds[i];
-            if (!round.hasPaid[uint256(Party.Sender)] || !round.hasPaid[uint256(Party.Receiver)]) {
+            if (i == totalRounds - 1) {
                 total += round.contributions[_beneficiary][uint256(Party.Sender)] + round.contributions[_beneficiary][uint256(Party.Receiver)];
             } else if (finalRuling == uint256(Party.None)) {
                 uint256 totalFeesPaid = round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)];
@@ -715,15 +723,17 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         view
         returns (
             uint256[3] memory paidFees,
-            bool[3] memory hasPaid,
-            uint256 feeRewards
+            Party sideFunded,
+            uint256 feeRewards,
+            bool appealed
         )
     {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         return (
             round.paidFees,
-            round.hasPaid,
-            round.feeRewards
+            round.sideFunded,
+            round.feeRewards,
+            _round != roundsByTransactionID[_transactionID].length - 1
         );
     }
 
