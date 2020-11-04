@@ -86,26 +86,26 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     // **************************** //
 
     /**
-     * @notice To be emitted whenever a transaction state is updated.
+     * @dev To be emitted whenever a transaction state is updated.
      * @param _transactionID The ID of the changed transaction.
      * @param _transaction The full transaction data after update.
      */
     event TransactionStateUpdated(uint256 indexed _transactionID, Transaction _transaction);
 
-    /** @notice To be emitted when a party pays or reimburses the other.
+    /** @dev To be emitted when a party pays or reimburses the other.
      *  @param _transactionID The index of the transaction.
      *  @param _amount The amount paid.
      *  @param _party The party that paid.
      */
     event Payment(uint256 indexed _transactionID, uint256 _amount, address _party);
 
-    /** @notice Indicate that a party has to pay a fee or would otherwise be considered as losing.
+    /** @dev Indicate that a party has to pay a fee or would otherwise be considered as losing.
      *  @param _transactionID The index of the transaction.
      *  @param _party The party who has to pay.
      */
     event HasToPayFee(uint256 indexed _transactionID, Party _party);
 
-    /** @notice Emitted when a transaction is created.
+    /** @dev Emitted when a transaction is created.
      *  @param _transactionID The index of the transaction.
      *  @param _sender The address of the sender.
      *  @param _receiver The address of the receiver.
@@ -114,20 +114,20 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      */
     event TransactionCreated(uint256 indexed _transactionID, address indexed _sender, address indexed _receiver, ERC20 _token, uint256 _amount);
     
-    /** @notice To be emitted when a transaction is resolved, either by its execution, a timeout or because a ruling was enforced.
+    /** @dev To be emitted when a transaction is resolved, either by its execution, a timeout or because a ruling was enforced.
      *  @param _transactionID The ID of the respective transaction.
      *  @param _resolution Short description of what caused the transaction to be solved.
      */
     event TransactionResolved(uint256 indexed _transactionID, Resolution indexed _resolution);
 
-    /** @notice To be emitted when the appeal fees of one of the parties are fully funded.
+    /** @dev To be emitted when the appeal fees of one of the parties are fully funded.
      *  @param _transactionID The ID of the respective transaction.
      *  @param _party The party that is fully funded.
      */
     event HasPaidAppealFee(uint256 indexed _transactionID, Party _party);
 
     /**
-     * @notice To be emitted when someone contributes to the appeal process.
+     * @dev To be emitted when someone contributes to the appeal process.
      * @param _transactionID The ID of the respective transaction.
      * @param _party The party which received the contribution.
      * @param _contributor The address of the contributor.
@@ -140,7 +140,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     // *    Modifying the state   * //
     // **************************** //
 
-    /** @notice Constructor.
+    /** @dev Constructor.
      *  @param _arbitrator The arbitrator of the contract.
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
@@ -181,7 +181,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _;
     }
 
-    /** @notice Create a transaction. UNTRUSTED.
+    /** @dev Create a transaction. UNTRUSTED.
      *  @param _amount The amount of tokens in this transaction.
      *  @param _token The ERC20 token contract.
      *  @param _timeoutPayment Time after which a party automatically loses a dispute.
@@ -215,7 +215,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionStateUpdated(transactionID, transaction);
     }
 
-    /** @notice Pay receiver. To be called if the good or service is provided. UNTRUSTED
+    /** @dev Pay receiver. To be called if the good or service is provided. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amount Amount to pay in wei.
@@ -233,7 +233,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @notice Reimburse sender. To be called if the good or service can't be fully provided. UNTRUSTED
+    /** @dev Reimburse sender. To be called if the good or service can't be fully provided. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amountReimbursed Amount to reimburse in wei.
@@ -251,7 +251,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @notice Transfer the transaction's amount to the receiver if the timeout has passed. UNTRUSTED
+    /** @dev Transfer the transaction's amount to the receiver if the timeout has passed. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -270,8 +270,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
 
-    /** @notice Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
-     *  @dev Note that the arbitrator can have createDispute throw, which will make this function throw and therefore lead to a party being timed-out.
+    /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
+     *  Note that the arbitrator can have createDispute throw, which will make this function throw and therefore lead to a party being timed-out.
      *  This is not a vulnerability as the arbitrator can rule in favor of one party anyway.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
@@ -298,8 +298,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @notice Pay the arbitration fee to raise a dispute. To be called by the receiver. UNTRUSTED.
-     *  @dev Note that this function mirrors payArbitrationFeeBySender.
+    /** @dev Pay the arbitration fee to raise a dispute. To be called by the receiver. UNTRUSTED.
+     *  Note that this function mirrors payArbitrationFeeBySender.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -325,7 +325,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @notice Reimburse sender if receiver fails to pay the fee. UNTRUSTED
+    /** @dev Reimburse sender if receiver fails to pay the fee. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -352,7 +352,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionResolved(_transactionID, Resolution.TimeoutBySender);
     }
 
-    /** @notice Pay receiver if sender fails to pay the fee. UNTRUSTED
+    /** @dev Pay receiver if sender fails to pay the fee. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -380,8 +380,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionResolved(_transactionID, Resolution.TimeoutByReceiver);
     }
 
-    /** @notice Create a dispute. UNTRUSTED.
-     *  @dev This function is internal and thus the transaction state validity is not checked. Caller functions MUST do the check before calling this function.
+    /** @dev Create a dispute. UNTRUSTED.
+     *  This function is internal and thus the transaction state validity is not checked. Caller functions MUST do the check before calling this function.
      *  _transaction MUST be a reference (not a copy) because its state is modified. Caller functions MUST emit the TransactionStateUpdated event and update the hash.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
@@ -410,7 +410,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         }
     }
 
-    /** @notice Submit a reference to evidence. EVENT.
+    /** @dev Submit a reference to evidence. EVENT.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _evidence A link to an evidence using its URI.
@@ -428,7 +428,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit Evidence(arbitrator, _transactionID, msg.sender, _evidence);
     }
 
-    /** @notice Takes up to the total amount required to fund a side of an appeal. Reimburses the rest. Creates an appeal if both sides are fully funded.
+    /** @dev Takes up to the total amount required to fund a side of an appeal. Reimburses the rest. Creates an appeal if both sides are fully funded.
      *  @param _transactionID The ID of the disputed transaction.
      *  @param _transaction The transaction state.
      *  @param _side The party that pays the appeal fee.
@@ -539,7 +539,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         contributionTo[uint256(Party.Receiver)] = 0;
     }
     
-    /** @notice Witdraws contributions of appeal rounds. Reimburses contributions if the appeal was not fully funded. 
+    /** @dev Witdraws contributions of appeal rounds. Reimburses contributions if the appeal was not fully funded. 
      *  If the appeal was fully funded, sends the fee stake rewards and reimbursements proportional to the contributions made to the winner of a dispute.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
@@ -555,7 +555,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
 
-    /** @notice Withdraws contributions of multiple appeal rounds at once. This function is O(n) where n is the number of rounds. 
+    /** @dev Withdraws contributions of multiple appeal rounds at once. This function is O(n) where n is the number of rounds. 
      *  This could exceed the gas limit, therefore this function should be used only as a utility and not be relied upon by other contracts.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
@@ -576,8 +576,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
 
-    /** @notice Give a ruling for a dispute. Must be called by the arbitrator to enforce the final ruling.
-     *  @dev The purpose of this function is to ensure that the address calling it has the right to rule on the contract.
+    /** @dev Give a ruling for a dispute. Must be called by the arbitrator to enforce the final ruling.
+     *  The purpose of this function is to ensure that the address calling it has the right to rule on the contract.
      *  @param _disputeID ID of the dispute in the Arbitrator contract.
      *  @param _ruling Ruling given by the arbitrator. Note that 0 is reserved for "Not able/wanting to make a decision".
      */
@@ -604,7 +604,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit Ruling(arbitrator, _disputeID, uint256(transactionDispute.ruling));
     }
 
-    /** @notice Execute a ruling of a dispute. It reimburses the fee to the winning party.
+    /** @dev Execute a ruling of a dispute. It reimburses the fee to the winning party.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -652,7 +652,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     // *     Constant getters     * //
     // **************************** //
     
-    /** @notice Returns the sum of withdrawable wei from appeal rounds. This function is O(n), where n is the number of rounds of the transaction. This could exceed the gas limit, therefore this function should only be used for interface display and not by other contracts.
+    /** @dev Returns the sum of withdrawable wei from appeal rounds. This function is O(n), where n is the number of rounds of the transaction. This could exceed the gas limit, therefore this function should only be used for interface display and not by other contracts.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _beneficiary The contributor for which to query.
@@ -683,14 +683,14 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         }
     }
 
-    /** @notice Getter to know the count of transactions.
+    /** @dev Getter to know the count of transactions.
      *  @return The count of transactions.
      */
     function getCountTransactions() public view returns (uint) {
         return transactionHashes.length;
     }
 
-    /** @notice Gets the number of rounds of the specific transaction.
+    /** @dev Gets the number of rounds of the specific transaction.
      *  @param _transactionID The ID of the transaction.
      *  @return The number of rounds.
      */
@@ -698,7 +698,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         return roundsByTransactionID[_transactionID].length;
     }
 
-    /** @notice Gets the contributions made by a party for a given round of the appeal.
+    /** @dev Gets the contributions made by a party for a given round of the appeal.
      *  @param _transactionID The ID of the transaction.
      *  @param _round The position of the round.
      *  @param _contributor The address of the contributor.
@@ -713,7 +713,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         contributions = round.contributions[_contributor];
     }
 
-    /** @notice Gets the information on a round of a transaction.
+    /** @dev Gets the information on a round of a transaction.
      *  @param _transactionID The ID of the transaction.
      *  @param _round The round to query.
      *  @return paidFees hasPaid feeRewards The round information.
@@ -738,8 +738,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     }
 
     /**
-     * @notice Gets the hashed version of the transaction state.
-     * @dev If the caller function is using a Transaction object stored in calldata, this function is unnecessarily expensive, use hashTransactionStateCD instead.
+     * @dev Gets the hashed version of the transaction state.
+     * If the caller function is using a Transaction object stored in calldata, this function is unnecessarily expensive, use hashTransactionStateCD instead.
      * @param _transaction The transaction state.
      * @return The hash of the transaction state.
      */
@@ -762,8 +762,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     }
 
     /**
-     * @notice Gets the hashed version of the transaction state.
-     * @dev this function is cheap (and can only be used) when the caller function is using a Transaction object stored in calldata.
+     * @dev Gets the hashed version of the transaction state.
+     * This function is cheap (and can only be used) when the caller function is using a Transaction object stored in calldata.
      * @param _transaction The transaction state.
      * @return The hash of the transaction state.
      */
