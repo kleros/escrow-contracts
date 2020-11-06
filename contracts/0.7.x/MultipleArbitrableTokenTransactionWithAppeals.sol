@@ -64,7 +64,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint8 ruling; // The ruling given by the arbitrator.
     }
 
-    IArbitrator public immutable arbitrator; // Address of the arbitrator contract.
+    IArbitrator public immutable arbitrator; // Address of the arbitrator contract. TRUSTED.
     bytes public arbitratorExtraData; // Extra data to set up the arbitration.
     uint256 public immutable feeTimeout; // Time in seconds a party can take to pay arbitration fees before being considered unresponsive and lose the dispute.
     

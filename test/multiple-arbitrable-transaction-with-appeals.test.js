@@ -2,15 +2,15 @@ const { ethers } = require('@nomiclabs/buidler')
 const { readArtifact } = require('@nomiclabs/buidler/plugins')
 const { solidity } = require('ethereum-waffle')
 const { use, expect } = require('chai')
+
 const {
-  randomInt,
   getEmittedEvent,
   latestTime,
   increaseTime
 } = require('../src/test-helpers')
-const TransactionStatus = require('../src/entities/TransactionStatus')
-const TransactionParty = require('../src/entities/TransactionParty')
-const DisputeRuling = require('../src/entities/DisputeRuling')
+const TransactionStatus = require('../src/entities/transaction-status')
+const TransactionParty = require('../src/entities/transaction-party')
+const DisputeRuling = require('../src/entities/dispute-ruling')
 
 use(solidity)
 
@@ -26,16 +26,18 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   const sharedMultiplier = 5000
   const winnerMultiplier = 2000
   const loserMultiplier = 8000
-  const NON_PAYABLE_VALUE = BigNumber.from((2n ** 256n - 2n) / 2n)
   const metaEvidenceUri = 'https://kleros.io'
 
   let arbitrator
-  let governor
+  let _governor
   let sender
   let receiver
   let other
   let crowdfunder1
   let crowdfunder2
+
+  let senderAddress
+  let receiverAddress
 
   let contract
   let MULTIPLIER_DIVISOR
@@ -43,7 +45,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
   beforeEach('Setup contracts', async () => {
     ;[
-      governor,
+      _governor,
       sender,
       receiver,
       other,
@@ -135,7 +137,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         .connect(receiver)
         .getCountTransactions()
       const expectedTransactionID = 1
-      const contractBalance = await web3.eth.getBalance(contract.address)
+      const contractBalance = await ethers.provider.getBalance(contract.address)
 
       expect(transactionCount).to.equal(
         BigNumber.from(expectedTransactionID),
@@ -156,7 +158,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     it('Should emit a correct TransactionStateUpdated event for the newly created transaction', async () => {
       currentTime = await latestTime()
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -191,7 +193,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should store the proper hashed transaction state of the newly created transaction', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -215,7 +217,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   describe('Reimburse sender', () => {
     it('Should reimburse the sender and update the hash correctly', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -225,7 +227,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         .connect(receiver)
         .reimburse(transactionId, transaction, amount)
       const reimburseReceipt = await reimburseTx.wait()
-      const [rTransactionId, rTransaction] = getEmittedEvent(
+      const [_rTransactionId, rTransaction] = getEmittedEvent(
         'TransactionStateUpdated',
         reimburseReceipt
       ).args
@@ -246,7 +248,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should emit correct TransactionStateUpdated and Payment events', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -306,7 +308,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should revert on bad inputs', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -333,7 +335,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
       await expect(
         contract.connect(receiver).reimburse(transactionId, transaction, amount)
-      ).to.be.revertedWith("Transaction doesn't match stored hash")
+      ).to.be.revertedWith("Transaction doesn't match stored hash.")
       await expect(
         contract
           .connect(receiver)
@@ -345,7 +347,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   describe('Pay receiver', () => {
     it('Should pay the receiver and update the hash correctly', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -355,7 +357,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         .connect(sender)
         .pay(transactionId, transaction, amount)
       const payReceipt = await payTx.wait()
-      const [payTransactionId, payTransaction] = getEmittedEvent(
+      const [_payTransactionId, payTransaction] = getEmittedEvent(
         'TransactionStateUpdated',
         payReceipt
       ).args
@@ -376,7 +378,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should emit correct TransactionStateUpdated and Payment events', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -438,7 +440,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should revert on bad inputs', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -463,7 +465,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
       await expect(
         contract.connect(sender).pay(transactionId, transaction, amount)
-      ).to.be.revertedWith("Transaction doesn't match stored hash")
+      ).to.be.revertedWith("Transaction doesn't match stored hash.")
       await expect(
         contract.connect(sender).pay(payTransactionId, payTransaction, amount)
       ).to.be.revertedWith('Maximum amount available for payment exceeded.')
@@ -473,7 +475,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   describe('Execute Transaction', () => {
     it('Should execute transaction and update the hash correctly', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -486,7 +488,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         .connect(other)
         .executeTransaction(transactionId, transaction)
       const executeReceipt = await executeTx.wait()
-      const [executeTransactionId, executeTransaction] = getEmittedEvent(
+      const [_executeTransactionId, executeTransaction] = getEmittedEvent(
         'TransactionStateUpdated',
         executeReceipt
       ).args
@@ -509,7 +511,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should emit correct TransactionStateUpdated event', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -561,7 +563,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should revert if timeout has not passed', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -573,7 +575,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should revert withdraws after execute is called', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -611,7 +613,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   describe('Disputes', () => {
     it('Should create dispute and execute ruling correctly, making the sender the winner', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -624,7 +626,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       await giveFinalRulingHelper(disputeID, DisputeRuling.Sender)
       // Anyone can execute ruling
       const balancesBefore = await getBalances()
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -649,7 +651,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should create dispute and execute ruling correctly, making the receiver the winner', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -662,7 +664,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       await giveFinalRulingHelper(disputeID, DisputeRuling.Receiver)
       // Anyone can execute ruling
       const balancesBefore = await getBalances()
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -687,7 +689,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should create dispute and execute ruling correctly when jurors refuse to rule', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -700,7 +702,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       await giveFinalRulingHelper(disputeID, DisputeRuling.RefusedToRule)
       // Anyone can execute ruling
       const balancesBefore = await getBalances()
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -726,7 +728,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should update Transaction state correctly when dispute is resolved', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -788,7 +790,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should refund overpaid arbitration fees', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -865,7 +867,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should reimburse the sender in case of timeout of the receiver', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -925,7 +927,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
     it('Should pay the receiver in case of timeout of the sender', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -981,9 +983,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
     })
 
-    it("Shouldn't be allowed to execute the timeout before it's right (Sender)", async () => {
+    it(`"Shouldn't be allowed to execute the timeout before it's right (Sender)"`, async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1019,9 +1021,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       ).to.be.revertedWith('Timeout time has not passed yet.')
     })
 
-    it("Shouldn't be allowed to execute the timeout before it's right (Receiver)", async () => {
+    it(`"Shouldn't be allowed to execute the timeout before it's right (Receiver)"`, async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1061,7 +1063,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   describe('Evidence', () => {
     it('Should allow sender and receiver to submit evidence', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1125,53 +1127,53 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
   describe('Multiple transactions', () => {
     it('Should handle multiple transactions concurrently', async () => {
-      const amount_2 = amount + 500
+      const amount2 = amount + 500
       const [
-        receipt_1,
-        transactionId_1,
-        transaction_1
+        _receipt1,
+        transactionId1,
+        transaction1
       ] = await createTransactionHelper(amount)
       const [
-        receipt_2,
-        transactionId_2,
-        transaction_2
-      ] = await createTransactionHelper(amount_2)
+        _receipt2,
+        transactionId2,
+        transaction2
+      ] = await createTransactionHelper(amount2)
 
       const [
-        disputeID_1,
-        disputeTransactionId_1,
-        disputeTransaction_1
-      ] = await createDisputeHelper(transactionId_1, transaction_1)
+        disputeID1,
+        disputeTransactionId1,
+        disputeTransaction1
+      ] = await createDisputeHelper(transactionId1, transaction1)
       const [
-        disputeID_2,
-        disputeTransactionId_2,
-        disputeTransaction_2
-      ] = await createDisputeHelper(transactionId_2, transaction_2)
+        disputeID2,
+        disputeTransactionId2,
+        disputeTransaction2
+      ] = await createDisputeHelper(transactionId2, transaction2)
       await submitEvidenceHelper(
-        disputeTransactionId_1,
-        disputeTransaction_1,
+        disputeTransactionId1,
+        disputeTransaction1,
         'ipfs:/evidence_1_001',
         sender
       )
       await submitEvidenceHelper(
-        disputeTransactionId_2,
-        disputeTransaction_2,
+        disputeTransactionId2,
+        disputeTransaction2,
         'ipfs:/evidence_2_001',
         receiver
       )
 
-      await giveFinalRulingHelper(disputeID_1, DisputeRuling.Sender)
-      await giveFinalRulingHelper(disputeID_2, DisputeRuling.Receiver)
+      await giveFinalRulingHelper(disputeID1, DisputeRuling.Sender)
+      await giveFinalRulingHelper(disputeID2, DisputeRuling.Receiver)
 
       const balancesBefore = await getBalances()
       await executeRulingHelper(
-        disputeTransactionId_1,
-        disputeTransaction_1,
+        disputeTransactionId1,
+        disputeTransaction1,
         other
       )
       await executeRulingHelper(
-        disputeTransactionId_2,
-        disputeTransaction_2,
+        disputeTransactionId2,
+        disputeTransaction2,
         other
       )
       const balancesAfter = await getBalances()
@@ -1180,15 +1182,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         balancesBefore.sender.add(BigNumber.from(arbitrationFee + amount))
       ).to.equal(balancesAfter.sender, 'Wrong sender balance.')
       expect(
-        balancesBefore.receiver.add(BigNumber.from(arbitrationFee + amount_2))
+        balancesBefore.receiver.add(BigNumber.from(arbitrationFee + amount2))
       ).to.equal(balancesAfter.receiver, 'Wrong receiver balance.')
     })
   })
-  
+
   describe('Appeals', () => {
     it('Should revert funding of appeals when the right conditions are not met', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1221,7 +1223,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
             TransactionParty.Sender,
             { value: 100 }
           )
-      ).to.be.revertedWith('The specified dispute is not appealable.')  // EnhancedAppealableArbitrator reverts
+      ).to.be.revertedWith('The specified dispute is not appealable.') // EnhancedAppealableArbitrator reverts
 
       // Rule against the receiver
       await giveRulingHelper(disputeID, DisputeRuling.Sender)
@@ -1265,21 +1267,23 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       let appealed
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
-      ] = await createDisputeHelper(transactionId, transaction);
+      ] = await createDisputeHelper(transactionId, transaction)
 
       // Round zero must be created but empty
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
-      )
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1292,14 +1296,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         0,
         'Wrong paidFee for party Receiver'
       )
-      expect(sideFunded).to.be.equal(
-        TransactionParty.None,
-        'Wrong sideFunded'
-      )
-      expect(appealed).to.be.equal(
-        false,
-        'Wrong round info: appealed'
-      )
+      expect(sideFunded).to.be.equal(TransactionParty.None, 'Wrong sideFunded')
+      expect(appealed).to.be.equal(false, 'Wrong round info: appealed')
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
 
       await giveRulingHelper(disputeID, DisputeRuling.Sender)
@@ -1314,7 +1312,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           { value: loserAppealFee }
         )
       const tx1 = await txPromise1
-      const receipt1 = await tx1.wait()
+      const _receipt1 = await tx1.wait()
       expect(txPromise1)
         .to.emit(contract, 'AppealContribution')
         .withArgs(
@@ -1339,7 +1337,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           }
         )
       const tx2 = await txPromise2
-      const receipt2 = await tx2.wait()
+      const _receipt2 = await tx2.wait()
       expect(txPromise2)
         .to.emit(contract, 'AppealContribution')
         .withArgs(
@@ -1350,13 +1348,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         )
       expect(txPromise2)
         .to.emit(contract, 'HasPaidAppealFee')
-        .withArgs(transactionId, TransactionParty.Sender);
+        .withArgs(transactionId, TransactionParty.Sender)
 
       // Round zero must be updated correctly
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
-      )
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1369,24 +1369,20 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(sideFunded).to.be.equal(
-        TransactionParty.None,
-        'Wrong sideFunded'
-      )
-      expect(appealed).to.be.equal(
-        true,
-        'Wrong round info: appealed'
-      )
+      expect(sideFunded).to.be.equal(TransactionParty.None, 'Wrong sideFunded')
+      expect(appealed).to.be.equal(true, 'Wrong round info: appealed')
       expect(feeRewards.toNumber()).to.be.equal(
         winnerAppealFee + loserAppealFee - arbitrationFee,
         'Wrong feeRewards'
-      );
+      )
 
       // Round one must be created but empty
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        1
-      )
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 1)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1399,14 +1395,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         0,
         'Wrong paidFee for party Receiver'
       )
-      expect(sideFunded).to.be.equal(
-        TransactionParty.None,
-        'Wrong sideFunded'
-      )
-      expect(appealed).to.be.equal(
-        false,
-        'Wrong round info: appealed'
-      )
+      expect(sideFunded).to.be.equal(TransactionParty.None, 'Wrong sideFunded')
+      expect(appealed).to.be.equal(false, 'Wrong round info: appealed')
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
     })
 
@@ -1423,13 +1413,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       let appealed
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
       await giveRulingHelper(disputeID, DisputeRuling.Sender)
@@ -1448,7 +1438,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           }
         )
       const tx1 = await txPromise1
-      const receipt1 = await tx1.wait()
+      await tx1.wait()
       expect(txPromise1)
         .to.emit(contract, 'AppealContribution')
         .withArgs(
@@ -1456,12 +1446,14 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           TransactionParty.Receiver,
           await crowdfunder1.getAddress(),
           contribution1
-        );
+        )
       // Round zero must be updated correctly
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
-      )
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1474,14 +1466,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         contribution1,
         'Wrong paidFee for party Receiver'
       )
-      expect(sideFunded).to.be.equal(
-        TransactionParty.None,
-        'Wrong sideFunded'
-      )
-      expect(appealed).to.be.equal(
-        false,
-        'Wrong round info: appealed'
-      )
+      expect(sideFunded).to.be.equal(TransactionParty.None, 'Wrong sideFunded')
+      expect(appealed).to.be.equal(false, 'Wrong round info: appealed')
       expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
 
       // Overpay fee and check if contributor is refunded
@@ -1518,12 +1504,14 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           .add(BigNumber.from(expectedContribution2))
           .add(receipt2.gasUsed * gasPrice),
         'Contributor was not refunded correctly'
-      );
-      // Round zero must be updated correctly
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
       )
+      // Round zero must be updated correctly
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1540,14 +1528,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         TransactionParty.Receiver,
         'Wrong sideFunded'
       )
-      expect(appealed).to.be.equal(
-        false,
-        'Wrong round info: appealed'
-      )
-      expect(feeRewards.toNumber()).to.be.equal(
-        0,
-        'Wrong feeRewards'
-      )
+      expect(appealed).to.be.equal(false, 'Wrong round info: appealed')
+      expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
       // The side is fully funded and new contributions must be reverted
       await expect(
         contract
@@ -1574,7 +1556,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           }
         )
       const tx3 = await txPromise3
-      const receipt3 = await tx3.wait()
+      await tx3.wait()
       expect(txPromise3)
         .to.emit(contract, 'AppealContribution')
         .withArgs(
@@ -1582,12 +1564,14 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           TransactionParty.Sender,
           await crowdfunder2.getAddress(),
           contribution3
-        );
+        )
       // Round zero must be updated correctly
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
-      )
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1604,14 +1588,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         TransactionParty.Receiver,
         'Wrong sideFunded'
       )
-      expect(appealed).to.be.equal(
-        false,
-        'Wrong round info: appealed'
-      )
-      expect(feeRewards.toNumber()).to.be.equal(
-        0,
-        'Wrong feeRewards'
-      )
+      expect(appealed).to.be.equal(false, 'Wrong round info: appealed')
+      expect(feeRewards.toNumber()).to.be.equal(0, 'Wrong feeRewards')
 
       // Overpay fee and check if contributor is refunded
       const balanceBeforeContribution4 = await sender.getBalance()
@@ -1647,12 +1625,14 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           .add(BigNumber.from(expectedContribution4))
           .add(receipt4.gasUsed * gasPrice),
         'Contributor was not refunded correctly'
-      );
-      // Round zero must be updated correctly
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
       )
+      // Round zero must be updated correctly
+      ;[
+        paidFees,
+        sideFunded,
+        feeRewards,
+        appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       expect(paidFees[TransactionParty.None].toNumber()).to.be.equal(
         0,
         'Wrong paidFee for party None'
@@ -1665,14 +1645,8 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         loserAppealFee,
         'Wrong paidFee for party Receiver'
       )
-      expect(sideFunded).to.be.equal(
-        TransactionParty.None,
-        'Wrong sideFunded'
-      )
-      expect(appealed).to.be.equal(
-        true,
-        'Wrong round info: appealed'
-      )
+      expect(sideFunded).to.be.equal(TransactionParty.None, 'Wrong sideFunded')
+      expect(appealed).to.be.equal(true, 'Wrong round info: appealed')
       expect(feeRewards.toNumber()).to.be.equal(
         loserAppealFee + winnerAppealFee - arbitrationFee,
         'Wrong feeRewards'
@@ -1684,13 +1658,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
       await giveRulingHelper(disputeID, DisputeRuling.Receiver)
@@ -1704,11 +1678,11 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           TransactionParty.Sender,
           { value: loserAppealFee }
         )
-      const receipt1 = await tx1.wait()
+      await tx1.wait()
 
       // Give final ruling and expect it to change
       await increaseTime(appealTimeout + 1)
-      const [txPromise2, tx2, receipt2] = await giveRulingHelper(
+      const [txPromise2, _tx2, _receipt2] = await giveRulingHelper(
         disputeID,
         DisputeRuling.Receiver
       )
@@ -1725,13 +1699,9 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const winnerAppealFee =
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
-      let paidFees
-      let sideFunded
-      let feeRewards
-      let appealed
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1817,7 +1787,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         DisputeRuling.Sender,
         disputeID
       )
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -1868,11 +1838,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       expect(balancesAfter.sender).to.equal(
         balancesAfter.sender,
         'Non contributors must not be rewarded'
-      );
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
       )
+      const [
+        paidFees,
+        _sideFunded,
+        feeRewards,
+        _appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       const reward3 = BigNumber.from(contribution3)
         .mul(feeRewards)
         .div(paidFees[TransactionParty.Sender])
@@ -1890,19 +1862,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
     })
 
-    it("Should withdraw correct fees if arbitrator refused to arbitrate'", async () => {
+    it('Should withdraw correct fees if arbitrator refused to arbitrate', async () => {
       const loserAppealFee =
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR
       const winnerAppealFee =
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
-      let paidFees
-      let sideFunded
-      let feeRewards
-      let appealed
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -1965,7 +1933,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         DisputeRuling.RefusedToRule,
         disputeID
       )
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -2012,11 +1980,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       expect(balancesBefore.sender).to.equal(
         balancesAfter.sender,
         'Non contributors must not be rewarded'
-      );
-      [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
       )
+      const [
+        paidFees,
+        _sideFunded,
+        feeRewards,
+        _appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
       const totalFeesPaid = paidFees[TransactionParty.Sender].add(
         paidFees[TransactionParty.Receiver]
       )
@@ -2046,7 +2016,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
     })
 
-    it("Should allow many rounds and batch-withdraw the fees after the final ruling'", async () => {
+    it('Should allow many rounds and batch-withdraw the fees after the final ruling', async () => {
       const loserAppealFee =
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR
       const winnerAppealFee =
@@ -2056,7 +2026,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       const winnerSide = TransactionParty.Sender
 
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -2068,7 +2038,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
 
       let roundDisputeID
       roundDisputeID = disputeID
-      for (var round_i = 0; round_i < roundsLength; round_i += 1) {
+      for (var roundI = 0; roundI < roundsLength; roundI += 1) {
         await giveRulingHelper(roundDisputeID, DisputeRuling.Sender)
         // Fully fund both sides
         await fundAppealHelper(
@@ -2094,7 +2064,7 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
         DisputeRuling.Sender,
         disputeID
       )
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         disputeTransactionId,
         disputeTransaction,
         other
@@ -2156,10 +2126,12 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
       )
 
       // In this case all rounds have equal fees and rewards to simplify calculations
-      const [paidFees, sideFunded, feeRewards, appealed] = await contract.getRoundInfo(
-        transactionId,
-        0
-      )
+      const [
+        paidFees,
+        _sideFunded,
+        feeRewards,
+        _appealed
+      ] = await contract.getRoundInfo(transactionId, 0)
 
       const roundReward = BigNumber.from(winnerAppealFee)
         .mul(feeRewards)
@@ -2178,6 +2150,11 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     })
   })
 
+  /**
+   * Creates a transaction by sender to receiver.
+   * @param {number} _amount Amount in wei.
+   * @returns {Array} Tx data.
+   */
   async function createTransactionHelper(_amount) {
     const metaEvidence = metaEvidenceUri
 
@@ -2195,6 +2172,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [receipt, transactionId, transaction]
   }
 
+  /**
+   * Make both sides pay arbitration fees. The transaction should have been previosuly created.
+   * @param {number} _transactionId Id of the transaction.
+   * @param {object} _transaction Current transaction object.
+   * @param {number} fee Appeal round from which to withdraw the rewards.
+   * @returns {Array} Tx data.
+   */
   async function createDisputeHelper(
     _transactionId,
     _transaction,
@@ -2249,6 +2233,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     ]
   }
 
+  /**
+   * Submit evidence related to a given transaction.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {string} evidence Link to evidence.
+   * @param {address} caller Can only be called by the sender or the receiver.
+   */
   async function submitEvidenceHelper(
     transactionId,
     transaction,
@@ -2257,15 +2248,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
   ) {
     const callerAddress = await caller.getAddress()
     if (
-      callerAddress == transaction.sender ||
-      callerAddress == transaction.receiver
-    ) {
-      if (transaction.status != TransactionStatus.Resolved) {
+      callerAddress === transaction.sender ||
+      callerAddress === transaction.receiver
+    )
+      if (transaction.status !== TransactionStatus.Resolved) {
         const txPromise = contract
           .connect(caller)
           .submitEvidence(transactionId, transaction, evidence)
         const tx = await txPromise
-        const receipt = await tx.wait()
+        await tx.wait()
         expect(txPromise)
           .to.emit(contract, 'Evidence')
           .withArgs(arbitrator.address, transactionId, callerAddress, evidence)
@@ -2278,15 +2269,20 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
           'Must not send evidence if the dispute is resolved.'
         )
       }
-    } else {
+    else
       await expect(
         contract
           .connect(caller)
           .submitEvidence(transactionId, transaction, evidence)
       ).to.be.revertedWith('The caller must be the sender or the receiver.')
-    }
   }
 
+  /**
+   * Give ruling (not final).
+   * @param {number} disputeID dispute ID.
+   * @param {number} ruling Ruling: None, Sender or Receiver.
+   * @returns {Array} Tx data.
+   */
   async function giveRulingHelper(disputeID, ruling) {
     // Notice that rule() function is not called by the arbitrator, because the dispute is appealable.
     const txPromise = arbitrator.giveRuling(disputeID, ruling)
@@ -2296,6 +2292,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Give final ruling and enforce it.
+   * @param {number} disputeID dispute ID.
+   * @param {number} ruling Ruling: None, Sender or Receiver.
+   * @param {number} transactionDisputeId Initial dispute ID.
+   * @returns {Array} Random integer in the range (0, max].
+   */
   async function giveFinalRulingHelper(
     disputeID,
     ruling,
@@ -2317,6 +2320,13 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Execute the final ruling.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {address} caller Can be anyone.
+   * @returns {Array} Transaction ID and the updated object.
+   */
   async function executeRulingHelper(transactionId, transaction, caller) {
     const tx = await contract
       .connect(caller)
@@ -2330,6 +2340,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [newTransactionId, newTransaction]
   }
 
+  /**
+   * Fund new appeal round.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {address} caller Can be anyone.
+   * @param {number} contribution Contribution amount in wei.
+   * @param {number} side Side to contribute to: Sender or Receiver.
+   * @returns {Array} Tx data.
+   */
   async function fundAppealHelper(
     transactionId,
     transaction,
@@ -2346,6 +2365,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Withdraw rewards to beneficiary.
+   * @param {address} beneficiary Address of the round contributor.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {number} round Appeal round from which to withdraw the rewards.
+   * @param {address} caller Can be anyone.
+   * @returns {Array} Tx data.
+   */
   async function withdrawHelper(
     beneficiary,
     transactionId,
@@ -2362,11 +2390,15 @@ describe('MultipleArbitrableTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Get wei balances of accounts and contract.
+   * @returns {object} Balances.
+   */
   async function getBalances() {
     const balances = {
       sender: await sender.getBalance(),
       receiver: await receiver.getBalance(),
-      contract: await web3.eth.getBalance(contract.address),
+      contract: await ethers.provider.getBalance(contract.address),
       crowdfunder1: await crowdfunder1.getBalance(),
       crowdfunder2: await crowdfunder2.getBalance()
     }

@@ -2,19 +2,13 @@ const { ethers } = require('@nomiclabs/buidler')
 const { readArtifact } = require('@nomiclabs/buidler/plugins')
 const { solidity } = require('ethereum-waffle')
 const { use, expect } = require('chai')
-const {
-  randomInt,
-  getEmittedEvent,
-  latestTime,
-  increaseTime
-} = require('../src/test-helpers')
-const TransactionStatus = require('../src/entities/TransactionStatus')
-const TransactionParty = require('../src/entities/TransactionParty')
-const DisputeRuling = require('../src/entities/DisputeRuling')
+
+const { getEmittedEvent, increaseTime } = require('../src/test-helpers')
+const TransactionStatus = require('../src/entities/transaction-status')
+const TransactionParty = require('../src/entities/transaction-party')
+const DisputeRuling = require('../src/entities/dispute-ruling')
 
 use(solidity)
-
-const { BigNumber } = ethers
 
 describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
   const arbitrationFee = 20
@@ -26,11 +20,10 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
   const sharedMultiplier = 5000
   const winnerMultiplier = 2000
   const loserMultiplier = 8000
-  const NON_PAYABLE_VALUE = BigNumber.from((2n ** 256n - 2n) / 2n)
   const metaEvidenceUri = 'https://kleros.io'
 
   let arbitrator
-  let governor
+  let _governor
   let sender
   let receiver
   let other
@@ -43,12 +36,11 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
   let contractArtifact
   let contract
   let MULTIPLIER_DIVISOR
-  let currentTime
   let token
 
   beforeEach('Setup contracts', async () => {
     ;[
-      governor,
+      _governor,
       sender,
       receiver,
       other,
@@ -114,16 +106,15 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     await createTransactionHelper(amount)
 
     MULTIPLIER_DIVISOR = await contract.MULTIPLIER_DIVISOR()
-    currentTime = await latestTime()
   })
   describe('Bytecode size estimations', () => {
     it('Should be smaller than the maximum allowed (24k)', async () => {
       const bytecode = contractArtifact.bytecode
       const deployed = contractArtifact.deployedBytecode
-      const sizeOfB  = bytecode.length / 2
-      const sizeOfD  = deployed.length / 2
-      console.log("\tsize of bytecode in bytes = ", sizeOfB)
-      console.log("\tsize of deployed in bytes = ", sizeOfD)
+      const sizeOfB = bytecode.length / 2
+      const sizeOfD = deployed.length / 2
+      console.log('\tsize of bytecode in bytes = ', sizeOfB)
+      console.log('\tsize of deployed in bytes = ', sizeOfD)
       expect(sizeOfD).to.be.lessThan(24576)
     })
   })
@@ -151,7 +142,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when reimbursing the sender.', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -169,7 +160,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when paying the receiver.', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -185,7 +176,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when executing the a transaction.', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -207,7 +198,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when paying fee (first party calling).', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -229,7 +220,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when paying fee (second party calling) and creating dispute.', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -242,7 +233,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
       const receiverFeeTx = await receiverTxPromise
       const receiverFeeReceipt = await receiverFeeTx.wait()
       const [
-        receiverFeeTransactionId,
+        _receiverFeeTransactionId,
         receiverFeeTransaction
       ] = getEmittedEvent('TransactionStateUpdated', receiverFeeReceipt).args
 
@@ -263,7 +254,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
 
     it('Estimate gas cost when timing out.', async () => {
       const [
-        receipt,
+        _receipt,
         transactionId,
         transaction
       ] = await createTransactionHelper(amount)
@@ -296,12 +287,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     })
 
     it('Estimate gas cost when executing a ruled dispute.', async () => {
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -320,12 +313,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     })
 
     it('Estimate gas cost when executing a ruled dispute where jurors refused to rule.', async () => {
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -344,9 +339,11 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     })
 
     it('Estimate gas cost when submitting evidence.', async () => {
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
 
       const txPromise = contract
         .connect(sender)
@@ -364,12 +361,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
       const loserAppealFee =
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR
 
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -395,12 +394,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
       const loserAppealFee =
         arbitrationFee + (arbitrationFee * loserMultiplier) / MULTIPLIER_DIVISOR
 
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -429,12 +430,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
 
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -448,7 +451,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         loserAppealFee,
         TransactionParty.Receiver
       )
-      const [txPromise, tx, receipt] = await fundAppealHelper(
+      const [_txPromise, _tx, receipt] = await fundAppealHelper(
         transactionId,
         disputeTransaction,
         sender,
@@ -467,12 +470,14 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         arbitrationFee +
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
 
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
@@ -501,13 +506,13 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         DisputeRuling.Sender,
         disputeID
       )
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         transactionId,
         disputeTransaction,
         other
       )
 
-      const [txPromise, tx, receipt] = await withdrawHelper(
+      const [_txPromise, _tx, receipt] = await withdrawHelper(
         senderAddress,
         transactionId,
         ruleTransaction,
@@ -529,18 +534,20 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         (arbitrationFee * winnerMultiplier) / MULTIPLIER_DIVISOR
       const roundsLength = 5
 
-      const [_, transactionId, transaction] = await createTransactionHelper(
-        amount
-      )
+      const [
+        _receipt,
+        transactionId,
+        transaction
+      ] = await createTransactionHelper(amount)
       const [
         disputeID,
-        disputeTransactionId,
+        _disputeTransactionId,
         disputeTransaction
       ] = await createDisputeHelper(transactionId, transaction)
 
       let roundDisputeID
       roundDisputeID = disputeID
-      for (var round_i = 0; round_i < roundsLength; round_i += 1) {
+      for (var roundI = 0; roundI < roundsLength; roundI += 1) {
         await giveRulingHelper(roundDisputeID, DisputeRuling.Sender)
         // Fully fund both sides
         await fundAppealHelper(
@@ -566,7 +573,7 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
         DisputeRuling.Sender,
         disputeID
       )
-      const [ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
         transactionId,
         disputeTransaction,
         other
@@ -592,13 +599,18 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     })
   })
 
+  /**
+   * Creates a transaction by sender to receiver.
+   * @param {number} _amount Amount in wei.
+   * @returns {Array} Tx data.
+   */
   async function createTransactionHelper(_amount) {
     const metaEvidence = metaEvidenceUri
 
     const tx = await contract
       .connect(sender)
       .createTransaction(
-        amount,
+        _amount,
         token.address,
         timeoutPayment,
         receiverAddress,
@@ -613,6 +625,13 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     return [receipt, transactionId, transaction]
   }
 
+  /**
+   * Make both sides pay arbitration fees. The transaction should have been previosuly created.
+   * @param {number} _transactionId Id of the transaction.
+   * @param {object} _transaction Current transaction object.
+   * @param {number} fee Appeal round from which to withdraw the rewards.
+   * @returns {Array} Tx data.
+   */
   async function createDisputeHelper(
     _transactionId,
     _transaction,
@@ -667,44 +686,12 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     ]
   }
 
-  async function submitEvidenceHelper(
-    transactionId,
-    transaction,
-    evidence,
-    caller
-  ) {
-    const callerAddress = await caller.getAddress()
-    if (
-      callerAddress == transaction.sender ||
-      callerAddress == transaction.receiver
-    ) {
-      if (transaction.status != TransactionStatus.Resolved) {
-        const txPromise = contract
-          .connect(caller)
-          .submitEvidence(transactionId, transaction, evidence)
-        const tx = await txPromise
-        const receipt = await tx.wait()
-        expect(txPromise)
-          .to.emit(contract, 'Evidence')
-          .withArgs(arbitrator.address, transactionId, callerAddress, evidence)
-      } else {
-        await expect(
-          contract
-            .connect(caller)
-            .submitEvidence(transactionId, transaction, evidence)
-        ).to.be.revertedWith(
-          'Must not send evidence if the dispute is resolved.'
-        )
-      }
-    } else {
-      await expect(
-        contract
-          .connect(caller)
-          .submitEvidence(transactionId, transaction, evidence)
-      ).to.be.revertedWith('The caller must be the sender or the receiver.')
-    }
-  }
-
+  /**
+   * Give ruling (not final).
+   * @param {number} disputeID dispute ID.
+   * @param {number} ruling Ruling: None, Sender or Receiver.
+   * @returns {Array} Tx data.
+   */
   async function giveRulingHelper(disputeID, ruling) {
     // Notice that rule() function is not called by the arbitrator, because the dispute is appealable.
     const txPromise = arbitrator.giveRuling(disputeID, ruling)
@@ -714,6 +701,13 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Give final ruling and enforce it.
+   * @param {number} disputeID dispute ID.
+   * @param {number} ruling Ruling: None, Sender or Receiver.
+   * @param {number} transactionDisputeId Initial dispute ID.
+   * @returns {Array} Random integer in the range (0, max].
+   */
   async function giveFinalRulingHelper(
     disputeID,
     ruling,
@@ -735,6 +729,13 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Execute the final ruling.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {address} caller Can be anyone.
+   * @returns {Array} Transaction ID and the updated object.
+   */
   async function executeRulingHelper(transactionId, transaction, caller) {
     const tx = await contract
       .connect(caller)
@@ -748,6 +749,15 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     return [newTransactionId, newTransaction]
   }
 
+  /**
+   * Fund new appeal round.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {address} caller Can be anyone.
+   * @param {number} contribution Contribution amount in wei.
+   * @param {number} side Side to contribute to: Sender or Receiver.
+   * @returns {Array} Tx data.
+   */
   async function fundAppealHelper(
     transactionId,
     transaction,
@@ -764,6 +774,15 @@ describe('MultipleArbitrableTokenTransactionWithAppeals contract', async () => {
     return [txPromise, tx, receipt]
   }
 
+  /**
+   * Withdraw rewards to beneficiary.
+   * @param {address} beneficiary Address of the round contributor.
+   * @param {number} transactionId Id of the transaction.
+   * @param {object} transaction Current transaction object.
+   * @param {number} round Appeal round from which to withdraw the rewards.
+   * @param {address} caller Can be anyone.
+   * @returns {Array} Tx data.
+   */
   async function withdrawHelper(
     beneficiary,
     transactionId,

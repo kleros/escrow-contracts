@@ -12,7 +12,7 @@ import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 import "@kleros/ethereum-libraries/contracts/CappedMath.sol";
- 
+
 contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     
     using CappedMath for uint256;
@@ -56,7 +56,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint8 ruling; // The ruling given by the arbitrator.
     }
 
-    IArbitrator public immutable arbitrator; // Address of the arbitrator contract.
+    IArbitrator public immutable arbitrator; // Address of the arbitrator contract. TRUSTED.
     bytes public arbitratorExtraData; // Extra data to set up the arbitration.
     uint256 public immutable feeTimeout; // Time in seconds a party can take to pay arbitration fees before being considered unresponsive and lose the dispute.
     

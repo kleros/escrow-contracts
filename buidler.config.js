@@ -5,17 +5,15 @@ usePlugin('@nomiclabs/buidler-ethers')
 usePlugin('@nomiclabs/buidler-web3')
 
 // Set the following variables if you want to deploy the contracts for testing using goerli
-const GOERLI_PRIVATE_KEY = ""
-const GOERLI_INFURA_PROJECT_ID = ""
+const GOERLI_PRIVATE_KEY = ''
+const GOERLI_INFURA_PROJECT_ID = ''
 
 // This is a sample Buidler task. To learn how to create your own go to
 // https://buidler.dev/guides/create-task.html
 task('accounts', 'Prints the list of accounts', async (_, { ethers }) => {
   const accounts = await ethers.getSigners()
 
-  for (const account of accounts) {
-    console.log(await account.getAddress())
-  }
+  for (const account of accounts) console.log(await account.getAddress())
 })
 
 // You have to export an object to set up your config
