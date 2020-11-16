@@ -441,26 +441,22 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         round.paidFees[uint256(_side)] += contribution;
 
         emit AppealContribution(_transactionID, _side, msg.sender, contribution);
-        
-        bool createAppeal;
-        if (round.paidFees[uint256(_side)] >= totalCost) {
-            if (round.sideFunded == Party.None)
-                round.sideFunded = _side;
-            else
-                createAppeal = true;
-            emit HasPaidAppealFee(_transactionID, _side);
-        }
 
         // Reimburse leftover ETH if any.
         if (remainingETH > 0)
             msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
-
-        // Create an appeal if each side is funded.
-        if (createAppeal) {
-            arbitrator.appeal{value: appealCost}(_transaction.disputeID, arbitratorExtraData);
-            round.feeRewards = (round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)]).subCap(appealCost);
-            roundsByTransactionID[_transactionID].push();
-            round.sideFunded = Party.None;
+        
+        if (round.paidFees[uint256(_side)] >= totalCost) {
+            if (round.sideFunded == Party.None) {
+                round.sideFunded = _side;
+            } else {
+                // Both sides are fully funded. Create an appeal.
+                arbitrator.appeal{value: appealCost}(_transaction.disputeID, arbitratorExtraData);
+                round.feeRewards = (round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)]).subCap(appealCost);
+                roundsByTransactionID[_transactionID].push();
+                round.sideFunded = Party.None;
+            }
+            emit HasPaidAppealFee(_transactionID, _side);
         }
     } 
     
