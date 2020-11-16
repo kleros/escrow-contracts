@@ -1,6 +1,6 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0]
- *  @reviewers: [@ferittuncer]
+ *  @reviewers: [@ferittuncer, @epiqueras]
  *  @auditors: []
  *  @bounties: []
  */
@@ -12,7 +12,7 @@ import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 import "@kleros/ethereum-libraries/contracts/CappedMath.sol";
- 
+
 contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     
     using CappedMath for uint256;
@@ -26,23 +26,23 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
     enum Party {None, Sender, Receiver}
     enum Status {NoDispute, WaitingSender, WaitingReceiver, DisputeCreated, Resolved}
+    enum Resolution {TransactionExecuted, TimeoutBySender, TimeoutByReceiver, RulingEnforced}
 
     struct Transaction {
         address payable sender;
         address payable receiver;
         uint256 amount;
-        uint256 timeoutPayment; // Time in seconds after which the transaction can be automatically executed if not disputed.
+        uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
         uint256 senderFee; // Total fees paid by the sender.
         uint256 receiverFee; // Total fees paid by the receiver.
         uint256 lastInteraction; // Last interaction for the dispute procedure.
         Status status;
-        uint256 ruling; // The ruling of the dispute, if any.
     }
     
     struct Round {
         uint256[3] paidFees; // Tracks the fees paid by each side in this round.
-        bool[3] hasPaid; // True when the side has fully paid its fee. False otherwise.
+        Party sideFunded; // If the round is appealed, i.e. this is not the last round, Party.None means that both sides have paid.
         uint256 feeRewards; // Sum of reimbursable fees and stake rewards available to the parties that made contributions to the side that ultimately wins a dispute.
         mapping(address => uint256[3]) contributions; // Maps contributors to their contributions for each side.
     }
@@ -51,18 +51,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      * @dev Tracks the state of eventual disputes.
      */
     struct TransactionDispute {
+        uint240 transactionID; // The transaction ID.
         bool hasRuling; // Required to differentiate between having no ruling and a RefusedToRule ruling.
-        uint128 transactionID; // The transaction ID.
         uint8 ruling; // The ruling given by the arbitrator.
     }
 
-    IArbitrator public arbitrator; // Address of the arbitrator contract.
+    IArbitrator public immutable arbitrator; // Address of the arbitrator contract. TRUSTED.
     bytes public arbitratorExtraData; // Extra data to set up the arbitration.
-    uint256 public feeTimeout; // Time in seconds a party can take to pay arbitration fees before being considered unresponding and lose the dispute.
+    uint256 public immutable feeTimeout; // Time in seconds a party can take to pay arbitration fees before being considered unresponsive and lose the dispute.
     
-    uint256 public sharedStakeMultiplier; // Multiplier for calculating the appeal fee that must be paid by submitter in the case where there is no winner or loser (e.g. when the arbitrator ruled "refuse to arbitrate").
-    uint256 public winnerStakeMultiplier; // Multiplier for calculating the appeal fee of the party that won the previous round.
-    uint256 public loserStakeMultiplier; // Multiplier for calculating the appeal fee of the party that lost the previous round.
+    uint256 public immutable sharedStakeMultiplier; // Multiplier for calculating the appeal fee that must be paid by the submitter in the case where there is no winner or loser (e.g. when the arbitrator ruled "refuse to arbitrate").
+    uint256 public immutable winnerStakeMultiplier; // Multiplier for calculating the appeal fee of the party that won the previous round.
+    uint256 public immutable loserStakeMultiplier; // Multiplier for calculating the appeal fee of the party that lost the previous round.
 
     /// @dev Stores the hashes of all transactions.
     bytes32[] public transactionHashes;
@@ -103,14 +103,13 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _receiver The address of the receiver.
      *  @param _amount The initial amount in the transaction.
      */
-    event TransactionCreated(uint256 _transactionID, address indexed _sender, address indexed _receiver, uint256 _amount);
+    event TransactionCreated(uint256 indexed _transactionID, address indexed _sender, address indexed _receiver, uint256 _amount);
 
     /** @dev To be emitted when a transaction is resolved, either by its execution, a timeout or because a ruling was enforced.
      *  @param _transactionID The ID of the respective transaction.
-     *  @param _reason Short description of what caused the transaction to be solved. 'transaction-executed' | 'timeout-by-sender' | 'timeout-by-receiver' | 'ruling-enforced'
-     *  @param _timestamp When the task was resolved.
+     *  @param _resolution Short description of what caused the transaction to be solved.
      */
-    event TransactionResolved(uint256 indexed _transactionID, string _reason, uint256 _timestamp);
+    event TransactionResolved(uint256 indexed _transactionID, Resolution indexed _resolution);
 
     /** @dev To be emitted when the appeal fees of one of the parties are fully funded.
      *  @param _transactionID The ID of the respective transaction.
@@ -125,7 +124,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      * @param _contributor The address of the contributor.
      * @param _amount The amount contributed.
      */
-    event AppealFeeContribution(uint256 indexed _transactionID, Party _party, address _contributor, uint256 _amount);
+    event AppealContribution(uint256 indexed _transactionID, Party _party, address _contributor, uint256 _amount);
 
     // **************************** //
     // *    Arbitrable functions  * //
@@ -136,7 +135,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _arbitrator The arbitrator of the contract.
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
-     *  @param _sharedStakeMultiplier Multiplier of the appeal cost that submitter must pay for a round when there is no winner/loser in the previous round. In basis points.
+     *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the submitter must pay for a round when there is no winner/loser in the previous round. In basis points.
      *  @param _winnerStakeMultiplier Multiplier of the appeal cost that the winner has to pay for a round. In basis points.
      *  @param _loserStakeMultiplier Multiplier of the appeal cost that the loser has to pay for a round. In basis points.
      */
@@ -159,7 +158,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     modifier onlyValidTransaction(uint256 _transactionID, Transaction memory _transaction) {
         require(
             transactionHashes[_transactionID - 1] == hashTransactionState(_transaction), 
-            "Transaction doesn't match stored hash"
+            "Transaction doesn't match stored hash."
             );
         _;
     }
@@ -168,7 +167,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     modifier onlyValidTransactionCD(uint256 _transactionID, Transaction calldata _transaction) {
         require(
             transactionHashes[_transactionID - 1] == hashTransactionStateCD(_transaction), 
-            "Transaction doesn't match stored hash"
+            "Transaction doesn't match stored hash."
             );
         _;
     }
@@ -189,7 +188,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         transaction.sender = msg.sender;
         transaction.receiver = _receiver;
         transaction.amount = msg.value;
-        transaction.timeoutPayment = _timeoutPayment;
+        transaction.deadline = block.timestamp + _timeoutPayment;
         transaction.lastInteraction = block.timestamp;
 
         transactionHashes.push(hashTransactionState(transaction));
@@ -210,7 +209,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amount <= _transaction.amount, "Maximum amount available for payment exceeded.");
 
-        _transaction.receiver.transfer(_amount);
+        _transaction.receiver.send(_amount);
         _transaction.amount -= _amount;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
@@ -228,7 +227,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amountReimbursed <= _transaction.amount, "Maximum reimbursement available exceeded.");
 
-        _transaction.sender.transfer(_amountReimbursed);
+        _transaction.sender.send(_amountReimbursed);
         _transaction.amount -= _amountReimbursed;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
@@ -241,17 +240,17 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _transaction The transaction state.
      */
     function executeTransaction(uint256 _transactionID, Transaction memory _transaction) public onlyValidTransaction(_transactionID, _transaction) {
-        require(block.timestamp - _transaction.lastInteraction >= _transaction.timeoutPayment, "The timeout has not passed yet.");
+        require(block.timestamp >= _transaction.deadline, "Deadline not passed.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
 
-        _transaction.receiver.transfer(_transaction.amount);
+        _transaction.receiver.send(_transaction.amount);
         _transaction.amount = 0;
 
         _transaction.status = Status.Resolved;
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
         emit TransactionStateUpdated(_transactionID, _transaction);
-        emit TransactionResolved(_transactionID, "transaction-executed", block.timestamp);
+        emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
 
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
@@ -327,11 +326,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.amount = 0;
         _transaction.senderFee = 0;
         _transaction.status = Status.Resolved;
-        _transaction.ruling = uint256(Party.Sender);
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
         emit TransactionStateUpdated(_transactionID, _transaction);
-        emit TransactionResolved(_transactionID, "timeout-by-sender", block.timestamp);
+        emit TransactionResolved(_transactionID, Resolution.TimeoutBySender);
     }
 
     /** @dev Pay receiver if sender fails to pay the fee.
@@ -351,16 +349,15 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.amount = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
-        _transaction.ruling = uint256(Party.Receiver);
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
         emit TransactionStateUpdated(_transactionID, _transaction);
-        emit TransactionResolved(_transactionID, "timeout-by-receiver", block.timestamp);
+        emit TransactionResolved(_transactionID, Resolution.TimeoutByReceiver);
     }
 
     /** @dev Create a dispute. UNTRUSTED.
-     *  @notice This function is internal and thus the transaction state validity is not checked. Caller functions MUST do the check before calling this function.
-     *  @notice _transaction MUST be a reference (not a copy) because its state is modified. Caller functions MUST emit the TransactionStateUpdated event and update the hash.
+     *  This function is internal and thus the transaction state validity is not checked. Caller functions MUST do the check before calling this function.
+     *  _transaction MUST be a reference (not a copy) because its state is modified. Caller functions MUST emit the TransactionStateUpdated event and update the hash.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _arbitrationCost Amount to pay the arbitrator.
@@ -370,7 +367,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.disputeID = arbitrator.createDispute{value: _arbitrationCost}(AMOUNT_OF_CHOICES, arbitratorExtraData);
         roundsByTransactionID[_transactionID].push();
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_transaction.disputeID];
-        transactionDispute.transactionID = uint128(_transactionID);
+        transactionDispute.transactionID = uint240(_transactionID);
         emit Dispute(arbitrator, _transaction.disputeID, _transactionID, _transactionID);
 
         // Refund sender if it overpaid.
@@ -414,51 +411,56 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     function fundAppeal(uint256 _transactionID, Transaction calldata _transaction, Party _side) public payable onlyValidTransactionCD(_transactionID, _transaction) {
         require(_side == Party.Sender || _side == Party.Receiver, "Wrong party.");
         require(_transaction.status == Status.DisputeCreated, "No dispute to appeal");
-        require(arbitrator.disputeStatus(_transaction.disputeID) == IArbitrator.DisputeStatus.Appealable, "Dispute is not appealable.");
 
         (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(_transaction.disputeID);
         require(block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd, "Funding must be made within the appeal period.");
 
-        uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
         uint256 multiplier;
-        if (winner == uint256(_side)){
-            multiplier = winnerStakeMultiplier;
-        } else if (winner == 0){
-            multiplier = sharedStakeMultiplier;
-        } else {
-            require(block.timestamp - appealPeriodStart < (appealPeriodEnd - appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
-            multiplier = loserStakeMultiplier;
+        {
+            // This scope prevents stack to deep errors.
+            uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
+            if (winner == uint256(_side)){
+                multiplier = winnerStakeMultiplier;
+            } else if (winner == 0){
+                multiplier = sharedStakeMultiplier;
+            } else {
+                require(block.timestamp - appealPeriodStart < (appealPeriodEnd - appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
+                multiplier = loserStakeMultiplier;
+            }
         }
 
         Round storage round = roundsByTransactionID[_transactionID][roundsByTransactionID[_transactionID].length - 1];
-        require(!round.hasPaid[uint256(_side)], "Appeal fee has already been paid.");
+        require(_side != round.sideFunded, "Appeal fee has already been paid.");
 
         uint256 appealCost = arbitrator.appealCost(_transaction.disputeID, arbitratorExtraData);
         uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / MULTIPLIER_DIVISOR);
 
         // Take up to the amount necessary to fund the current round at the current costs.
-        uint256 contribution; // Amount contributed.
-        uint256 remainingETH; // Remaining ETH to send back.
-        (contribution, remainingETH) = calculateContribution(msg.value, totalCost.subCap(round.paidFees[uint256(_side)]));
+        (uint256 contribution, uint256 remainingETH) = calculateContribution(msg.value, totalCost.subCap(round.paidFees[uint256(_side)]));
         round.contributions[msg.sender][uint256(_side)] += contribution;
         round.paidFees[uint256(_side)] += contribution;
 
-        emit AppealFeeContribution(_transactionID, _side, msg.sender, contribution);
+        emit AppealContribution(_transactionID, _side, msg.sender, contribution);
         
+        bool createAppeal;
         if (round.paidFees[uint256(_side)] >= totalCost) {
-            round.hasPaid[uint256(_side)] = true;
-            round.feeRewards += round.paidFees[uint256(_side)];
+            if (round.sideFunded == Party.None)
+                round.sideFunded = _side;
+            else
+                createAppeal = true;
             emit HasPaidAppealFee(_transactionID, _side);
         }
 
-        // Reimburse leftover ETH.
-        msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
+        // Reimburse leftover ETH if any.
+        if (remainingETH > 0)
+            msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
 
         // Create an appeal if each side is funded.
-        if (round.hasPaid[uint256(Party.Sender)] && round.hasPaid[uint256(Party.Receiver)]) {
+        if (createAppeal) {
             arbitrator.appeal{value: appealCost}(_transaction.disputeID, arbitratorExtraData);
-            round.feeRewards = round.feeRewards.subCap(appealCost);
+            round.feeRewards = (round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)]).subCap(appealCost);
             roundsByTransactionID[_transactionID].push();
+            round.sideFunded = Party.None;
         }
     } 
     
@@ -480,8 +482,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         return (_requiredAmount, remainder);
     }
     
-    /** @dev Updates contributions of appeal rounds which are going to be withdrawn.
-     *  @notice Caller functions MUST: (1) check that the transaction is valid and Resolved and (2) send the rewards to the _beneficiary.
+    /** @dev Updates the state of contributions of appeal rounds which are going to be withdrawn.
+     *  Caller functions MUST: (1) check that the transaction is valid and Resolved and (2) send the rewards to the _beneficiary.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
      *  @param _round The round from which to withdraw.
@@ -491,7 +493,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     function _withdrawFeesAndRewards(address _beneficiary, uint256 _transactionID, uint256 _round, uint256 _finalRuling) internal returns(uint256 reward) {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         uint256[3] storage contributionTo = round.contributions[_beneficiary];
-        if (!round.hasPaid[uint256(Party.Sender)] || !round.hasPaid[uint256(Party.Receiver)]) {
+        uint256 lastRound = roundsByTransactionID[_transactionID].length - 1;
+
+        if (_round == lastRound) {
             // Allow to reimburse if funding was unsuccessful.
             reward = contributionTo[uint256(Party.Sender)] + contributionTo[uint256(Party.Receiver)];
         } else if (_finalRuling == uint256(Party.None)) {
@@ -509,7 +513,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         contributionTo[uint256(Party.Receiver)] = 0;
     }
     
-    /** @dev Witdraws contributions of appeal rounds. Reimburses contributions if the appeal was not fully funded. If the appeal was fully funded, sends the fee stake rewards and reimbursements proportional to the contributions made to the winner of a dispute.
+    /** @dev Witdraws contributions of appeal rounds. Reimburses contributions if the appeal was not fully funded. 
+     *  If the appeal was fully funded, sends the fee stake rewards and reimbursements proportional to the contributions made to the winner of a dispute.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
      *  @param _transaction The transaction state.
@@ -517,11 +522,15 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      */
     function withdrawFeesAndRewards(address payable _beneficiary, uint256 _transactionID, Transaction calldata _transaction, uint256 _round) public onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
-        uint256 reward = _withdrawFeesAndRewards(_beneficiary, _transactionID, _round, _transaction.ruling);
+        TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_transaction.disputeID];
+        require(transactionDispute.transactionID == _transactionID, "Undisputed transaction");
+
+        uint256 reward = _withdrawFeesAndRewards(_beneficiary, _transactionID, _round, uint256(transactionDispute.ruling));
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
     
-    /** @dev Withdraws contributions of multiple appeal rounds at once. This function is O(n) where n is the number of rounds. This could exceed the gas limit, therefore this function should be used only as a utility and not be relied upon by other contracts.
+    /** @dev Withdraws contributions of multiple appeal rounds at once. This function is O(n) where n is the number of rounds. 
+     *  This could exceed the gas limit, therefore this function should be used only as a utility and not be relied upon by other contracts.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
      *  @param _transaction The transaction state.
@@ -530,15 +539,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      */
     function batchRoundWithdraw(address payable _beneficiary, uint256 _transactionID, Transaction calldata _transaction, uint256 _cursor, uint256 _count) public onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
+        TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_transaction.disputeID];
+        require(transactionDispute.transactionID == _transactionID, "Undisputed transaction");
+        uint256 finalRuling = uint256(transactionDispute.ruling);
 
         uint256 reward;
         uint256 totalRounds = roundsByTransactionID[_transactionID].length;
         for (uint256 i = _cursor; i<totalRounds && (_count==0 || i<_cursor+_count); i++)
-            reward += _withdrawFeesAndRewards(_beneficiary, _transactionID, i, _transaction.ruling);
+            reward += _withdrawFeesAndRewards(_beneficiary, _transactionID, i, finalRuling);
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
 
-    /** @dev Give a ruling for a dispute. Must be called by the arbitrator.
+    /** @dev Give a ruling for a dispute. Must be called by the arbitrator to enforce the final ruling.
      *  The purpose of this function is to ensure that the address calling it has the right to rule on the contract.
      *  @param _disputeID ID of the dispute in the Arbitrator contract.
      *  @param _ruling Ruling given by the arbitrator. Note that 0 is reserved for "Not able/wanting to make a decision".
@@ -555,9 +567,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         Round storage round = rounds[rounds.length - 1];
 
         // If only one side paid its fees we assume the ruling to be in its favor.
-        if (round.hasPaid[uint256(Party.Sender)] == true)
+        if (round.sideFunded == Party.Sender)
             transactionDispute.ruling = uint8(Party.Sender);
-        else if (round.hasPaid[uint256(Party.Receiver)] == true)
+        else if (round.sideFunded == Party.Receiver)
             transactionDispute.ruling = uint8(Party.Receiver);
         else
             transactionDispute.ruling = uint8(_ruling);
@@ -592,18 +604,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.senderFee = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
-        _transaction.ruling = uint256(transactionDispute.ruling);
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
         emit TransactionStateUpdated(_transactionID, _transaction);
-        emit TransactionResolved(_transactionID, "ruling-enforced", block.timestamp);
+        emit TransactionResolved(_transactionID, Resolution.RulingEnforced);
     }
 
     // **************************** //
     // *     Constant getters     * //
     // **************************** //
     
-    /** @dev Returns the sum of withdrawable wei from appeal rounds. This function is O(n), where n is the number of rounds of the transaction. This could exceed the gas limit, therefore this function should only be used for interface display and not by other contracts.
+    /** @dev Returns the sum of withdrawable wei from appeal rounds. This function is O(n), where n is the number of rounds of the transaction. 
+     *  This could exceed the gas limit, therefore this function should only be used for interface display and not by other contracts.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _beneficiary The contributor for which to query.
@@ -612,19 +624,23 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     function amountWithdrawable(uint256 _transactionID, Transaction calldata _transaction, address _beneficiary) public view onlyValidTransactionCD(_transactionID, _transaction) returns (uint256 total) {
         if (_transaction.status != Status.Resolved) return total;
 
+        TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[_transaction.disputeID];
+        if (transactionDispute.transactionID != _transactionID) return total;
+        uint256 finalRuling = uint256(transactionDispute.ruling);
+
         Round[] storage rounds = roundsByTransactionID[_transactionID];
         uint256 totalRounds = rounds.length;
         for (uint256 i = 0; i < totalRounds; i++) {
             Round storage round = rounds[i];
-            if (!round.hasPaid[uint256(Party.Sender)] || !round.hasPaid[uint256(Party.Receiver)]) {
+            if (i == totalRounds - 1) {
                 total += round.contributions[_beneficiary][uint256(Party.Sender)] + round.contributions[_beneficiary][uint256(Party.Receiver)];
-            } else if (_transaction.ruling == uint256(Party.None)) {
+            } else if (finalRuling == uint256(Party.None)) {
                 uint256 totalFeesPaid = round.paidFees[uint256(Party.Sender)] + round.paidFees[uint256(Party.Receiver)];
                 uint256 totalBeneficiaryContributions = round.contributions[_beneficiary][uint256(Party.Sender)] + round.contributions[_beneficiary][uint256(Party.Receiver)];
                 total += totalFeesPaid > 0 ? (totalBeneficiaryContributions * round.feeRewards) / totalFeesPaid : 0;
             } else {
-                total += round.paidFees[uint256(_transaction.ruling)] > 0
-                    ? (round.contributions[_beneficiary][uint256(_transaction.ruling)] * round.feeRewards) / round.paidFees[uint256(_transaction.ruling)]
+                total += round.paidFees[finalRuling] > 0
+                    ? (round.contributions[_beneficiary][finalRuling] * round.feeRewards) / round.paidFees[finalRuling]
                     : 0;
             }
         }
@@ -663,28 +679,30 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     /** @dev Gets the information on a round of a transaction.
      *  @param _transactionID The ID of the transaction.
      *  @param _round The round to query.
-     *  @return paidFees hasPaid feeRewards The round information.
+     *  @return paidFees sideFunded feeRewards appealed The round information.
      */
     function getRoundInfo(uint256 _transactionID, uint256 _round)
         public
         view
         returns (
             uint256[3] memory paidFees,
-            bool[3] memory hasPaid,
-            uint256 feeRewards
+            Party sideFunded,
+            uint256 feeRewards,
+            bool appealed
         )
     {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         return (
             round.paidFees,
-            round.hasPaid,
-            round.feeRewards
+            round.sideFunded,
+            round.feeRewards,
+            _round != roundsByTransactionID[_transactionID].length - 1
         );
     }
 
     /**
      * @dev Gets the hashed version of the transaction state.
-     * @notice If the caller function is using a Transaction object stored in calldata, this function is unnecessarily expensive, use hashTransactionStateCD instead.
+     * If the caller function is using a Transaction object stored in calldata, this function is unnecessarily expensive, use hashTransactionStateCD instead.
      * @param _transaction The transaction state.
      * @return The hash of the transaction state.
      */
@@ -695,20 +713,19 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.sender,
                     _transaction.receiver,
                     _transaction.amount,
-                    _transaction.timeoutPayment,
+                    _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
                     _transaction.receiverFee,
                     _transaction.lastInteraction,
-                    _transaction.status,
-                    _transaction.ruling
+                    _transaction.status
                 )
             );
     }
 
     /**
      * @dev Gets the hashed version of the transaction state.
-     * @notice this function is cheap (and can only be used) when the caller function is using a Transaction object stored in calldata
+     * This function is cheap and can only be used when the caller function is using a Transaction object stored in calldata.
      * @param _transaction The transaction state.
      * @return The hash of the transaction state.
      */
@@ -719,13 +736,12 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.sender,
                     _transaction.receiver,
                     _transaction.amount,
-                    _transaction.timeoutPayment,
+                    _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
                     _transaction.receiverFee,
                     _transaction.lastInteraction,
-                    _transaction.status,
-                    _transaction.ruling
+                    _transaction.status
                 )
             );
     }

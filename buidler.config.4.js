@@ -9,9 +9,7 @@ usePlugin('@nomiclabs/buidler-web3')
 task('accounts', 'Prints the list of accounts', async (_, { ethers }) => {
   const accounts = await ethers.getSigners()
 
-  for (const account of accounts) {
-    console.log(await account.getAddress())
-  }
+  for (const account of accounts) console.log(await account.getAddress())
 })
 
 // You have to export an object to set up your config
