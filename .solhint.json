@@ -3,6 +3,10 @@
   "rules": {
     "compiler-version": "off",
     "func-visibility": "off",
+    "reason-string": "off",
+    "check-send-result": "off",
+    "not-rely-on-time": "off",
+    "multiple-sends": "off",
 
     "mark-callable-contracts": "off",
 

@@ -1,6 +1,6 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0]
- *  @reviewers: [@ferittuncer, @epiqueras]
+ *  @reviewers: [@ferittuncer, @epiqueras, @nix1g]
  *  @auditors: []
  *  @bounties: []
  */
@@ -53,7 +53,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     struct TransactionDispute {
         uint240 transactionID; // The transaction ID.
         bool hasRuling; // Required to differentiate between having no ruling and a RefusedToRule ruling.
-        uint8 ruling; // The ruling given by the arbitrator.
+        Party ruling; // The ruling given by the arbitrator.
     }
 
     IArbitrator public immutable arbitrator; // Address of the arbitrator contract. TRUSTED.
@@ -209,10 +209,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amount <= _transaction.amount, "Maximum amount available for payment exceeded.");
 
-        _transaction.receiver.send(_amount);
+        _transaction.receiver.send(_amount); // It is the user responsibility to accept ETH.
         _transaction.amount -= _amount;
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit Payment(_transactionID, _amount, msg.sender);
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
@@ -227,10 +227,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amountReimbursed <= _transaction.amount, "Maximum reimbursement available exceeded.");
 
-        _transaction.sender.send(_amountReimbursed);
+        _transaction.sender.send(_amountReimbursed); // It is the user responsibility to accept ETH.
         _transaction.amount -= _amountReimbursed;
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit Payment(_transactionID, _amountReimbursed, msg.sender);
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
@@ -243,12 +243,12 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(block.timestamp >= _transaction.deadline, "Deadline not passed.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
 
-        _transaction.receiver.send(_transaction.amount);
+        _transaction.receiver.send(_transaction.amount); // It is the user responsibility to accept ETH.
         _transaction.amount = 0;
 
         _transaction.status = Status.Resolved;
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
@@ -318,16 +318,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(block.timestamp - _transaction.lastInteraction >= feeTimeout, "Timeout time has not passed yet.");
 
         if (_transaction.receiverFee != 0) {
-            _transaction.receiver.send(_transaction.receiverFee);
+            _transaction.receiver.send(_transaction.receiverFee); // It is the user responsibility to accept ETH.
             _transaction.receiverFee = 0;
         }
 
-        _transaction.sender.send(_transaction.senderFee + _transaction.amount);
+        _transaction.sender.send(_transaction.senderFee + _transaction.amount); // It is the user responsibility to accept ETH.
         _transaction.amount = 0;
         _transaction.senderFee = 0;
         _transaction.status = Status.Resolved;
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TimeoutBySender);
     }
@@ -341,16 +341,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(block.timestamp - _transaction.lastInteraction >= feeTimeout, "Timeout time has not passed yet.");
 
         if (_transaction.senderFee != 0) {
-            _transaction.sender.send(_transaction.senderFee);
+            _transaction.sender.send(_transaction.senderFee); // It is the user responsibility to accept ETH.
             _transaction.senderFee = 0;
         }
 
-        _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
+        _transaction.receiver.send(_transaction.receiverFee + _transaction.amount); // It is the user responsibility to accept ETH.
         _transaction.amount = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TimeoutByReceiver);
     }
@@ -374,14 +374,14 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         if (_transaction.senderFee > _arbitrationCost) {
             uint256 extraFeeSender = _transaction.senderFee - _arbitrationCost;
             _transaction.senderFee = _arbitrationCost;
-            _transaction.sender.send(extraFeeSender);
+            _transaction.sender.send(extraFeeSender); // It is the user responsibility to accept ETH.
         }
 
         // Refund receiver if it overpaid.
         if (_transaction.receiverFee > _arbitrationCost) {
             uint256 extraFeeReceiver = _transaction.receiverFee - _arbitrationCost;
             _transaction.receiverFee = _arbitrationCost;
-            _transaction.receiver.send(extraFeeReceiver);
+            _transaction.receiver.send(extraFeeReceiver); // It is the user responsibility to accept ETH.
         }
     }
 
@@ -409,24 +409,21 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _side The party that pays the appeal fee.
      */
     function fundAppeal(uint256 _transactionID, Transaction calldata _transaction, Party _side) public payable onlyValidTransactionCD(_transactionID, _transaction) {
-        require(_side == Party.Sender || _side == Party.Receiver, "Wrong party.");
+        require(_side != Party.None, "Wrong party.");
         require(_transaction.status == Status.DisputeCreated, "No dispute to appeal");
 
         (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(_transaction.disputeID);
         require(block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd, "Funding must be made within the appeal period.");
 
         uint256 multiplier;
-        {
-            // This scope prevents stack to deep errors.
-            uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
-            if (winner == uint256(_side)){
-                multiplier = winnerStakeMultiplier;
-            } else if (winner == 0){
-                multiplier = sharedStakeMultiplier;
-            } else {
-                require(block.timestamp - appealPeriodStart < (appealPeriodEnd - appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
-                multiplier = loserStakeMultiplier;
-            }
+        uint256 winner = arbitrator.currentRuling(_transaction.disputeID);
+        if (winner == uint256(_side)){
+            multiplier = winnerStakeMultiplier;
+        } else if (winner == 0){
+            multiplier = sharedStakeMultiplier;
+        } else {
+            require(block.timestamp < (appealPeriodEnd + appealPeriodStart)/2, "The loser must pay during the first half of the appeal period.");
+            multiplier = loserStakeMultiplier;
         }
 
         Round storage round = roundsByTransactionID[_transactionID][roundsByTransactionID[_transactionID].length - 1];
@@ -444,7 +441,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         // Reimburse leftover ETH if any.
         if (remainingETH > 0)
-            msg.sender.send(remainingETH); // Deliberate use of send in order to not block the contract in case of reverting fallback.
+            msg.sender.send(remainingETH); // It is the user responsibility to accept ETH.
         
         if (round.paidFees[uint256(_side)] >= totalCost) {
             if (round.sideFunded == Party.None) {
@@ -564,11 +561,11 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         // If only one side paid its fees we assume the ruling to be in its favor.
         if (round.sideFunded == Party.Sender)
-            transactionDispute.ruling = uint8(Party.Sender);
+            transactionDispute.ruling = Party.Sender;
         else if (round.sideFunded == Party.Receiver)
-            transactionDispute.ruling = uint8(Party.Receiver);
+            transactionDispute.ruling = Party.Receiver;
         else
-            transactionDispute.ruling = uint8(_ruling);
+            transactionDispute.ruling = Party(_ruling);
 
         transactionDispute.hasRuling = true;
         emit Ruling(arbitrator, _disputeID, uint256(transactionDispute.ruling));
@@ -586,14 +583,14 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         // Give the arbitration fee back.
         // Note that we use send to prevent a party from blocking the execution.
-        if (transactionDispute.ruling == uint8(Party.Sender)) {
+        if (transactionDispute.ruling == Party.Sender) {
             _transaction.sender.send(_transaction.senderFee + _transaction.amount);
-        } else if (transactionDispute.ruling == uint8(Party.Receiver)) {
+        } else if (transactionDispute.ruling == Party.Receiver) {
             _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
         } else {
-            uint256 split_amount = (_transaction.senderFee + _transaction.amount) / 2;
-            _transaction.sender.send(split_amount);
-            _transaction.receiver.send(split_amount);
+            uint256 splitAmount = (_transaction.senderFee + _transaction.amount) / 2;
+            _transaction.sender.send(splitAmount);
+            _transaction.receiver.send(splitAmount);
         }
 
         _transaction.amount = 0;
@@ -601,7 +598,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.RulingEnforced);
     }
