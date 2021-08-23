@@ -1,4 +1,4 @@
-const { time } = require('@openzeppelin/test-helpers')
+const { time } = require("@openzeppelin/test-helpers");
 
 /**
  * Get randomInt
@@ -6,7 +6,7 @@ const { time } = require('@openzeppelin/test-helpers')
  * @returns {number} Random integer in the range (0, max].
  */
 function randomInt(max) {
-  return Math.ceil(Math.random() * max)
+  return Math.ceil(Math.random() * max);
 }
 
 /**
@@ -16,7 +16,7 @@ function randomInt(max) {
  * @returns {object} Event data.
  */
 function getEmittedEvent(eventName, receipt) {
-  return receipt.events.find(({ event }) => event === eventName)
+  return receipt.events.find(({ event }) => event === eventName);
 }
 
 /**
@@ -24,7 +24,7 @@ function getEmittedEvent(eventName, receipt) {
  * @returns {number} Latest time.
  */
 async function latestTime() {
-  return Number(await time.latest())
+  return Number(await time.latest());
 }
 
 /**
@@ -33,12 +33,12 @@ async function latestTime() {
  * @returns {number} New current time.
  */
 async function increaseTime(secondsPassed) {
-  return time.increase(secondsPassed)
+  return time.increase(secondsPassed);
 }
 
 module.exports = {
   randomInt,
   getEmittedEvent,
   latestTime,
-  increaseTime
-}
+  increaseTime,
+};

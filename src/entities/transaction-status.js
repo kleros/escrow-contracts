@@ -3,7 +3,7 @@ const TransactionStatus = {
   WaitingSender: 1,
   WaitingReceiver: 2,
   DisputeCreated: 3,
-  Resolved: 4
-}
+  Resolved: 4,
+};
 
-module.exports = TransactionStatus
+module.exports = TransactionStatus;
