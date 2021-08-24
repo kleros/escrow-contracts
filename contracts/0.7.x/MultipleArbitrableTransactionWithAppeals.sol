@@ -28,13 +28,17 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         Sender,
         Receiver
     }
+
     enum Status {
         NoDispute,
+        WaitingSettlementSender,
+        WaitingSettlementReceiver,
         WaitingSender,
         WaitingReceiver,
         DisputeCreated,
         Resolved
     }
+
     enum Resolution {
         TransactionExecuted,
         TimeoutBySender,
@@ -46,6 +50,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         address payable sender;
         address payable receiver;
         uint256 amount;
+        uint256 amountSettlement;
         uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
         uint256 senderFee; // Total fees paid by the sender.
@@ -79,6 +84,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     // Time in seconds a party can take to pay arbitration fees before being
     // considered unresponsive and lose the dispute.
     uint256 public immutable feeTimeout;
+
+    // Time in seconds a party can take to accept or propose a settlement
+    // before being considered unresponsive and the case can be arbitrated.
+    uint256 public immutable settlementTimeout;
 
     // Multiplier for calculating the appeal fee that must be paid by the
     // submitter in the case where there is no winner or loser
@@ -171,6 +180,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _arbitrator The arbitrator of the contract.
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
+     *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
      *  submitter must pay for a round when there is no winner/loser in the
      *  previous round. In basis points.
@@ -183,6 +193,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         IArbitrator _arbitrator,
         bytes memory _arbitratorExtraData,
         uint256 _feeTimeout,
+        uint256 _settlementTimeout,
         uint256 _sharedStakeMultiplier,
         uint256 _winnerStakeMultiplier,
         uint256 _loserStakeMultiplier
@@ -190,6 +201,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         arbitrator = _arbitrator;
         arbitratorExtraData = _arbitratorExtraData;
         feeTimeout = _feeTimeout;
+        settlementTimeout = _settlementTimeout;
         sharedStakeMultiplier = _sharedStakeMultiplier;
         winnerStakeMultiplier = _winnerStakeMultiplier;
         loserStakeMultiplier = _loserStakeMultiplier;
@@ -309,6 +321,46 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
 
+    /** @notice Propose a settlement as a compromise from the initial terms to the other party.
+     *  @param _transactionID The index of the transaction.
+     *  @param _transaction The transaction state.
+     */
+    function proposeSettlement(
+        uint256 _transactionID,
+        Transaction memory _transaction,
+        uint256 _amount
+    )
+        external
+        onlyValidTransaction(_transactionID, _transaction)
+    {
+        require(_transaction.status < Status.WaitingSender, "Transaction already escalated for arbitration");
+
+        if (_transaction.status == Status.WaitingSettlementSender) {
+            require(msg.sender == _transaction.sender,
+                "The caller must be the sender.");
+            _transaction.status = Status.WaitingSettlementReceiver;
+        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
+            require(msg.sender == _transaction.receiver,
+                "The caller must be the receiver.");
+            _transaction.status = Status.WaitingSettlementSender;
+        } else {
+            if (msg.sender == _transaction.sender)
+                _transaction.status = Status.WaitingSettlementReceiver;
+            else if (msg.sender == _transaction.receiver)
+                _transaction.status = Status.WaitingSettlementSender;
+            else
+                revert("Only the sender or receiver addresses are authorized")
+        }
+
+        require(_amount < _transaction.amount,
+            "Settlement amount cannot be more that the initial amount");
+        _transaction.amountSettlement = _amount;
+
+        _transaction.lastInteraction = block.timestamp;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        emit TransactionStateUpdated(_transactionID, _transaction);
+    }
+
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
      *  Note that the arbitrator can have createDispute throw, which will make
      *  this function throw and therefore lead to a party being timed-out.
@@ -321,6 +373,15 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
+        require(
+            _transaction.status > Status.NoDispute,
+            "Settlement not attempted first"
+        );
+        require(
+            block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+            "Settlement period has not timed out yet."
+        );
+
         require(
             _transaction.status < Status.DisputeCreated,
             "Dispute has already been created or because the transaction has been executed."
@@ -361,6 +422,15 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
+        require(
+            _transaction.status > Status.NoDispute,
+            "Settlement not attempted first"
+        );
+        require(
+            block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+            "Settlement period has not timed out yet."
+        );
+
         require(
             _transaction.status < Status.DisputeCreated,
             "Dispute has already been created or because the transaction has been executed."
