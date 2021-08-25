@@ -329,31 +329,30 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint256 _transactionID,
         Transaction memory _transaction,
         uint256 _amount
-    )
-        external
-        onlyValidTransaction(_transactionID, _transaction)
-    {
-        require(_transaction.status < Status.WaitingSender, "Transaction already escalated for arbitration");
+    ) external onlyValidTransaction(_transactionID, _transaction) {
+        require(
+            _transaction.status < Status.WaitingSender,
+            "Transaction already escalated for arbitration"
+        );
 
         if (_transaction.status == Status.WaitingSettlementSender) {
-            require(msg.sender == _transaction.sender,
-                "The caller must be the sender.");
+            require(msg.sender == _transaction.sender, "The caller must be the sender.");
             _transaction.status = Status.WaitingSettlementReceiver;
         } else if (_transaction.status == Status.WaitingSettlementReceiver) {
-            require(msg.sender == _transaction.receiver,
-                "The caller must be the receiver.");
+            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
             _transaction.status = Status.WaitingSettlementSender;
         } else {
             if (msg.sender == _transaction.sender)
                 _transaction.status = Status.WaitingSettlementReceiver;
             else if (msg.sender == _transaction.receiver)
                 _transaction.status = Status.WaitingSettlementSender;
-            else
-                revert("Only the sender or receiver addresses are authorized")
+            else revert("Only the sender or receiver addresses are authorized");
         }
 
-        require(_amount < _transaction.amount,
-            "Settlement amount cannot be more that the initial amount");
+        require(
+            _amount <= _transaction.amount,
+            "Settlement amount cannot be more that the initial amount"
+        );
         _transaction.amountSettlement = _amount;
 
         _transaction.lastInteraction = block.timestamp;
@@ -373,14 +372,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
-        require(
-            _transaction.status > Status.NoDispute,
-            "Settlement not attempted first"
-        );
-        require(
-            block.timestamp - _transaction.lastInteraction >= settlementTimeout,
-            "Settlement period has not timed out yet."
-        );
+        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        if (
+            _transaction.status == Status.WaitingSettlementSender ||
+            _transaction.status == Status.WaitingSettlementReceiver
+        ) {
+            require(
+                block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+                "Settlement period has not timed out yet."
+            );
+        }
 
         require(
             _transaction.status < Status.DisputeCreated,
@@ -422,14 +423,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
-        require(
-            _transaction.status > Status.NoDispute,
-            "Settlement not attempted first"
-        );
-        require(
-            block.timestamp - _transaction.lastInteraction >= settlementTimeout,
-            "Settlement period has not timed out yet."
-        );
+        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        if (
+            _transaction.status == Status.WaitingSettlementSender ||
+            _transaction.status == Status.WaitingSettlementReceiver
+        ) {
+            require(
+                block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+                "Settlement period has not timed out yet."
+            );
+        }
 
         require(
             _transaction.status < Status.DisputeCreated,
