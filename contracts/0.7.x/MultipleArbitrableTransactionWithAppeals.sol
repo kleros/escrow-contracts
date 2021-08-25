@@ -324,6 +324,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     /** @notice Propose a settlement as a compromise from the initial terms to the other party.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
+     *  @param _amount The settlement amount.
      */
     function proposeSettlement(
         uint256 _transactionID,
@@ -358,6 +359,37 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.lastInteraction = block.timestamp;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
         emit TransactionStateUpdated(_transactionID, _transaction);
+    }
+
+    /** @notice Accept a settlement proposed by the other party.
+     *  @param _transactionID The index of the transaction.
+     *  @param _transaction The transaction state.
+     */
+    function acceptSettlement(uint256 _transactionID, Transaction memory _transaction)
+        external
+        onlyValidTransaction(_transactionID, _transaction)
+    {
+        if (_transaction.status == Status.WaitingSettlementSender) {
+            require(msg.sender == _transaction.sender, "The caller must be the sender.");
+        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
+            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
+        } else revert("No settlement proposed to accept.");
+
+        uint256 remainingAmount = _transaction.amount - _transaction.amountSettlement;
+        uint256 settlementAmount = _transaction.amountSettlement;
+
+        _transaction.amount = 0;
+        _transaction.amountSettlement = 0;
+
+        // It is the user responsibility to accept ETH.
+        _transaction.sender.send(remainingAmount);
+        _transaction.receiver.send(settlementAmount);
+
+        _transaction.status = Status.Resolved;
+
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
 
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
