@@ -50,7 +50,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         address payable sender;
         address payable receiver;
         uint256 amount;
-        uint256 amountSettlement;
+        uint256 settlementSender; // Settlement amount proposed by the sender
+        uint256 settlementReceiver; // Settlement amount proposed by the receiver
         uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
         uint256 senderFee; // Total fees paid by the sender.
@@ -322,6 +323,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     }
 
     /** @notice Propose a settlement as a compromise from the initial terms to the other party.
+     *  @dev A party can only propose a settlement again after the other party has
+     *  done so as well to prevent front running attacks on acceptProposal.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amount The settlement amount.
@@ -336,25 +339,28 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             "Transaction already escalated for arbitration"
         );
 
-        if (_transaction.status == Status.WaitingSettlementSender) {
-            require(msg.sender == _transaction.sender, "The caller must be the sender.");
-            _transaction.status = Status.WaitingSettlementReceiver;
-        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
-            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
-            _transaction.status = Status.WaitingSettlementSender;
-        } else {
-            if (msg.sender == _transaction.sender)
-                _transaction.status = Status.WaitingSettlementReceiver;
-            else if (msg.sender == _transaction.receiver)
-                _transaction.status = Status.WaitingSettlementSender;
-            else revert("Only the sender or receiver addresses are authorized");
-        }
-
         require(
             _amount <= _transaction.amount,
             "Settlement amount cannot be more that the initial amount"
         );
-        _transaction.amountSettlement = _amount;
+
+        if (_transaction.status == Status.WaitingSettlementSender) {
+            require(msg.sender == _transaction.sender, "The caller must be the sender.");
+            _transaction.settlementSender = _amount;
+            _transaction.status = Status.WaitingSettlementReceiver;
+        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
+            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
+            _transaction.settlementReceiver = _amount;
+            _transaction.status = Status.WaitingSettlementSender;
+        } else {
+            if (msg.sender == _transaction.sender) {
+                _transaction.settlementSender = _amount;
+                _transaction.status = Status.WaitingSettlementReceiver;
+            } else if (msg.sender == _transaction.receiver) {
+                _transaction.settlementReceiver = _amount;
+                _transaction.status = Status.WaitingSettlementSender;
+            } else revert("Only the sender or receiver addresses are authorized");
+        }
 
         _transaction.lastInteraction = block.timestamp;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
@@ -369,23 +375,26 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         external
         onlyValidTransaction(_transactionID, _transaction)
     {
+        uint256 settlementAmount;
         if (_transaction.status == Status.WaitingSettlementSender) {
             require(msg.sender == _transaction.sender, "The caller must be the sender.");
+            settlementAmount = _transaction.settlementReceiver;
         } else if (_transaction.status == Status.WaitingSettlementReceiver) {
             require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
-        } else revert("No settlement proposed to accept.");
+            settlementAmount = _transaction.settlementSender;
+        } else revert("No settlement proposed to accept or tx already disputed/resolved.");
 
-        uint256 remainingAmount = _transaction.amount - _transaction.amountSettlement;
-        uint256 settlementAmount = _transaction.amountSettlement;
+        uint256 remainingAmount = _transaction.amount - settlementAmount;
 
         _transaction.amount = 0;
-        _transaction.amountSettlement = 0;
-
-        // It is the user responsibility to accept ETH.
-        _transaction.sender.send(remainingAmount);
-        _transaction.receiver.send(settlementAmount);
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
 
         _transaction.status = Status.Resolved;
+
+        // It is the users responsibility to accept ETH.
+        _transaction.sender.send(remainingAmount);
+        _transaction.receiver.send(settlementAmount);
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
@@ -865,9 +874,27 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         // Give the arbitration fee back.
         // Note that we use send to prevent a party from blocking the execution.
         if (transactionDispute.ruling == Party.Sender) {
-            _transaction.sender.send(_transaction.senderFee + _transaction.amount);
+            // if there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest
+            if (_transaction.settlementSender != 0) {
+                _transaction.sender.send(
+                    _transaction.senderFee + _transaction.amount - _transaction.settlementSender
+                );
+                _transaction.receiver.send(_transaction.settlementSender);
+            } else {
+                _transaction.sender.send(_transaction.senderFee + _transaction.amount);
+            }
         } else if (transactionDispute.ruling == Party.Receiver) {
-            _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
+            // if there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest to sender
+            if (_transaction.settlementReceiver != 0) {
+                _transaction.sender.send(_transaction.amount - _transaction.settlementReceiver);
+                _transaction.receiver.send(
+                    _transaction.receiverFee + _transaction.settlementReceiver
+                );
+            } else {
+                _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
+            }
         } else {
             uint256 splitAmount = (_transaction.senderFee + _transaction.amount) / 2;
             _transaction.sender.send(splitAmount);
@@ -875,6 +902,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         }
 
         _transaction.amount = 0;
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
         _transaction.senderFee = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
