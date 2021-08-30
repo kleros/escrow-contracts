@@ -874,7 +874,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         // Give the arbitration fee back.
         // Note that we use send to prevent a party from blocking the execution.
         if (transactionDispute.ruling == Party.Sender) {
-            // if there was a settlement amount proposed
+            // If there was a settlement amount proposed
             // we use that to make the partial payment and refund the rest
             if (_transaction.settlementSender != 0) {
                 _transaction.sender.send(
@@ -885,7 +885,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                 _transaction.sender.send(_transaction.senderFee + _transaction.amount);
             }
         } else if (transactionDispute.ruling == Party.Receiver) {
-            // if there was a settlement amount proposed
+            // If there was a settlement amount proposed
             // we use that to make the partial payment and refund the rest to sender
             if (_transaction.settlementReceiver != 0) {
                 _transaction.sender.send(_transaction.amount - _transaction.settlementReceiver);

@@ -38,6 +38,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     }
     enum Status {
         NoDispute,
+        WaitingSettlementSender,
+        WaitingSettlementReceiver,
         WaitingSender,
         WaitingReceiver,
         DisputeCreated,
@@ -54,6 +56,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         address payable sender;
         address payable receiver;
         uint256 amount;
+        uint256 settlementSender; // Settlement amount proposed by the sender
+        uint256 settlementReceiver; // Settlement amount proposed by the receiver
         ERC20 token;
         uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
@@ -88,6 +92,10 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     // Time in seconds a party can take to pay arbitration fees before being
     // considered unresponsive and lose the dispute.
     uint256 public immutable feeTimeout;
+
+    // Time in seconds a party can take to accept or propose a settlement
+    // before being considered unresponsive and the case can be arbitrated.
+    uint256 public immutable settlementTimeout;
 
     // Multiplier for calculating the appeal fee that must be paid by the
     // submitter in the case where there is no winner or loser
@@ -182,6 +190,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _arbitrator The arbitrator of the contract.
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
+     *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
      *  submitter must pay for a round when there is no winner/loser in
      *  the previous round. In basis points.
@@ -194,6 +203,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         IArbitrator _arbitrator,
         bytes memory _arbitratorExtraData,
         uint256 _feeTimeout,
+        uint256 _settlementTimeout,
         uint256 _sharedStakeMultiplier,
         uint256 _winnerStakeMultiplier,
         uint256 _loserStakeMultiplier
@@ -201,6 +211,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         arbitrator = _arbitrator;
         arbitratorExtraData = _arbitratorExtraData;
         feeTimeout = _feeTimeout;
+        settlementTimeout = _settlementTimeout;
         sharedStakeMultiplier = _sharedStakeMultiplier;
         winnerStakeMultiplier = _winnerStakeMultiplier;
         loserStakeMultiplier = _loserStakeMultiplier;
@@ -345,6 +356,90 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
 
+    /** @notice Propose a settlement as a compromise from the initial terms to the other party.
+     *  @dev A party can only propose a settlement again after the other party has
+     *  done so as well to prevent front running attacks on acceptProposal.
+     *  @param _transactionID The index of the transaction.
+     *  @param _transaction The transaction state.
+     *  @param _amount The settlement amount.
+     */
+    function proposeSettlement(
+        uint256 _transactionID,
+        Transaction memory _transaction,
+        uint256 _amount
+    ) external onlyValidTransaction(_transactionID, _transaction) {
+        require(
+            _transaction.status < Status.WaitingSender,
+            "Transaction already escalated for arbitration"
+        );
+
+        require(
+            _amount <= _transaction.amount,
+            "Settlement amount cannot be more that the initial amount"
+        );
+
+        if (_transaction.status == Status.WaitingSettlementSender) {
+            require(msg.sender == _transaction.sender, "The caller must be the sender.");
+            _transaction.settlementSender = _amount;
+            _transaction.status = Status.WaitingSettlementReceiver;
+        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
+            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
+            _transaction.settlementReceiver = _amount;
+            _transaction.status = Status.WaitingSettlementSender;
+        } else {
+            if (msg.sender == _transaction.sender) {
+                _transaction.settlementSender = _amount;
+                _transaction.status = Status.WaitingSettlementReceiver;
+            } else if (msg.sender == _transaction.receiver) {
+                _transaction.settlementReceiver = _amount;
+                _transaction.status = Status.WaitingSettlementSender;
+            } else revert("Only the sender or receiver addresses are authorized");
+        }
+
+        _transaction.lastInteraction = block.timestamp;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
+        emit TransactionStateUpdated(_transactionID, _transaction);
+    }
+
+    /** @notice Accept a settlement proposed by the other party.
+     *  @param _transactionID The index of the transaction.
+     *  @param _transaction The transaction state.
+     */
+    function acceptSettlement(uint256 _transactionID, Transaction memory _transaction)
+        external
+        onlyValidTransaction(_transactionID, _transaction)
+    {
+        uint256 settlementAmount;
+        if (_transaction.status == Status.WaitingSettlementSender) {
+            require(msg.sender == _transaction.sender, "The caller must be the sender.");
+            settlementAmount = _transaction.settlementReceiver;
+        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
+            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
+            settlementAmount = _transaction.settlementSender;
+        } else revert("No settlement proposed to accept or tx already disputed/resolved.");
+
+        uint256 remainingAmount = _transaction.amount - settlementAmount;
+
+        _transaction.amount = 0;
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
+
+        _transaction.status = Status.Resolved;
+
+        require(
+            _transaction.token.transfer(_transaction.sender, remainingAmount),
+            "The `transfer` function must not fail."
+        );
+        require(
+            _transaction.token.transfer(_transaction.receiver, settlementAmount),
+            "The `transfer` function must not fail."
+        );
+
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        emit TransactionStateUpdated(_transactionID, _transaction);
+        emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
+    }
+
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
      *  Note that the arbitrator can have createDispute throw, which will make
      *  this function throw and therefore lead to a party being timed-out.
@@ -357,6 +452,17 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
+        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        if (
+            _transaction.status == Status.WaitingSettlementSender ||
+            _transaction.status == Status.WaitingSettlementReceiver
+        ) {
+            require(
+                block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+                "Settlement period has not timed out yet."
+            );
+        }
+
         require(
             _transaction.status < Status.DisputeCreated,
             "Dispute has already been created or because the transaction has been executed."
@@ -395,6 +501,17 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
+        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        if (
+            _transaction.status == Status.WaitingSettlementSender ||
+            _transaction.status == Status.WaitingSettlementReceiver
+        ) {
+            require(
+                block.timestamp - _transaction.lastInteraction >= settlementTimeout,
+                "Settlement period has not timed out yet."
+            );
+        }
+
         require(
             _transaction.status < Status.DisputeCreated,
             "Dispute has already been created or because the transaction has been executed."
@@ -807,10 +924,14 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         require(transactionDispute.hasRuling, "Arbitrator has not ruled yet.");
 
         uint256 amount = _transaction.amount;
+        uint256 settlementSender = _transaction.settlementSender;
+        uint256 settlementReceiver = _transaction.settlementReceiver;
         uint256 senderFee = _transaction.senderFee;
         uint256 receiverFee = _transaction.receiverFee;
 
         _transaction.amount = 0;
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
         _transaction.senderFee = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
@@ -820,16 +941,44 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         // Note that we use `send` to prevent a party from blocking the execution.
         if (transactionDispute.ruling == Party.Sender) {
             _transaction.sender.send(senderFee);
-            require(
-                _transaction.token.transfer(_transaction.sender, amount),
-                "The `transfer` function must not fail."
-            );
+
+            // If there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest to sender
+            if (settlementSender != 0) {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount - settlementSender),
+                    "The `transfer` function must not fail."
+                );
+                require(
+                    _transaction.token.transfer(_transaction.receiver, settlementSender),
+                    "The `transfer` function must not fail."
+                );
+            } else {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount),
+                    "The `transfer` function must not fail."
+                );
+            }
         } else if (transactionDispute.ruling == Party.Receiver) {
             _transaction.receiver.send(receiverFee);
-            require(
-                _transaction.token.transfer(_transaction.receiver, amount),
-                "The `transfer` function must not fail."
-            );
+
+            // If there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest to sender
+            if (settlementReceiver != 0) {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount - settlementReceiver),
+                    "The `transfer` function must not fail."
+                );
+                require(
+                    _transaction.token.transfer(_transaction.receiver, settlementReceiver),
+                    "The `transfer` function must not fail."
+                );
+            } else {
+                require(
+                    _transaction.token.transfer(_transaction.receiver, amount),
+                    "The `transfer` function must not fail."
+                );
+            }
         } else {
             // `senderFee` and `receiverFee` are equal to the arbitration cost.
             uint256 splitArbitrationFee = senderFee / 2;
