@@ -425,6 +425,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         _transaction.settlementReceiver = 0;
 
         _transaction.status = Status.Resolved;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
 
         require(
             _transaction.token.transfer(_transaction.sender, remainingAmount),
@@ -435,7 +436,6 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
             "The `transfer` function must not fail."
         );
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }

@@ -17,6 +17,7 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
   const arbitratorExtraData = "0x85";
   const appealTimeout = 100;
   const feeTimeout = 100;
+  const settlementTimeout = 100;
   const timeoutPayment = 100;
   const amount = 1000;
   const sharedMultiplier = 5000;
@@ -25,7 +26,6 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
   const metaEvidenceUri = "https://kleros.io";
 
   let arbitrator;
-  let _governor;
   let sender;
   let receiver;
   let other;
@@ -74,6 +74,7 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
       arbitrator.address,
       arbitratorExtraData,
       feeTimeout,
+      settlementTimeout,
       sharedMultiplier,
       winnerMultiplier,
       loserMultiplier,
