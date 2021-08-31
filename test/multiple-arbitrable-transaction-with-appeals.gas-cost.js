@@ -149,9 +149,21 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     it("Estimate gas cost when paying fee (first party calling).", async () => {
       const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
 
+      const senderSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      await increaseTime(100);
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
       const senderFeePromise = contract
         .connect(sender)
-        .payArbitrationFeeBySender(transactionId, transaction, {
+        .payArbitrationFeeBySender(settlementTransactionId, settlementTransaction, {
           value: arbitrationFee,
         });
       const senderFeeTx = await senderFeePromise;
@@ -166,9 +178,21 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     it("Estimate gas cost when paying fee (second party calling) and creating dispute.", async () => {
       const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
 
+      const senderSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      await increaseTime(100);
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
       const receiverTxPromise = contract
         .connect(receiver)
-        .payArbitrationFeeByReceiver(transactionId, transaction, {
+        .payArbitrationFeeByReceiver(settlementTransactionId, settlementTransaction, {
           value: arbitrationFee,
         });
       const receiverFeeTx = await receiverTxPromise;
@@ -195,9 +219,21 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     it("Estimate gas cost when timing out.", async () => {
       const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
 
+      const senderSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      await increaseTime(100);
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
       const senderFeePromise = contract
         .connect(sender)
-        .payArbitrationFeeBySender(transactionId, transaction, {
+        .payArbitrationFeeBySender(settlementTransactionId, settlementTransaction, {
           value: arbitrationFee,
         });
       const senderFeeTx = await senderFeePromise;
@@ -486,9 +522,21 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
    */
   async function createDisputeHelper(_transactionId, _transaction, fee = arbitrationFee) {
     // Pay fees, create dispute and validate events.
+    const receiverSettlementTx = await contract
+      .connect(receiver)
+      .proposeSettlement(_transactionId, _transaction, _transaction.amount);
+    const receiverSettltementReceipt = await receiverSettlementTx.wait();
+
+    await increaseTime(100);
+
+    const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+      "TransactionStateUpdated",
+      receiverSettltementReceipt,
+    ).args;
+
     const receiverTxPromise = contract
       .connect(receiver)
-      .payArbitrationFeeByReceiver(_transactionId, _transaction, {
+      .payArbitrationFeeByReceiver(settlementTransactionId, settlementTransaction, {
         value: fee,
       });
     const receiverFeeTx = await receiverTxPromise;
