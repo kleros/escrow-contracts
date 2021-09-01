@@ -196,6 +196,227 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
     });
   });
 
+  describe("Settlement", () => {
+    it("Should be able to propose a settlement", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      const [sTransactionId, sTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(sTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should not be possible for to propose a settlement consecutively (Sender)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      // Propose once
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      const [sTransactionId, sTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      // Try proposing again
+      await expect(
+        contract
+          .connect(sender)
+          .proposeSettlement(sTransactionId, sTransaction, transaction.amount / 2 - 1),
+      ).to.be.revertedWith("The caller must be the receiver.");
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(sTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should not be possible for to propose a settlement consecutively (Receiver)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      // Propose once
+      const receiverSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
+      const receiverSettltementReceipt = await receiverSettlementTx.wait();
+
+      const [rTransactionId, rTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverSettltementReceipt,
+      ).args;
+
+      // Try proposing again
+      await expect(
+        contract
+          .connect(receiver)
+          .proposeSettlement(rTransactionId, rTransaction, transaction.amount / 2 - 1),
+      ).to.be.revertedWith("The caller must be the sender.");
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(rTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should not propose a settlement amount greater than the original", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      await expect(
+        contract
+          .connect(receiver)
+          .proposeSettlement(transactionId, transaction, transaction.amount + 1),
+      ).to.be.revertedWith("Settlement amount cannot be more that the initial amount");
+    });
+
+    it("Should allow a proposal to be accepted (Sender)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2 + 1);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      const [sTransactionId, sTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      // Sender should not be able to accept his own proposal
+      await expect(
+        contract.connect(sender).acceptSettlement(sTransactionId, sTransaction),
+      ).to.be.revertedWith("The caller must be the receiver.");
+
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const senderAcceptTx = await contract
+        .connect(receiver)
+        .acceptSettlement(sTransactionId, sTransaction);
+      const senderAcceptReceipt = await senderAcceptTx.wait();
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.sender + (amount / 2 - 1)).to.equal(
+        tokensAfter.sender,
+        "Sender was not paid correctly",
+      );
+      expect(tokensBefore.receiver + (amount / 2 + 1)).to.equal(
+        tokensAfter.receiver,
+        "Receiver was not paid correctly",
+      );
+
+      const [rTransactionId, rTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderAcceptReceipt,
+      ).args;
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(rTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should allow a proposal to be accepted (Receiver)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const receiverSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, transaction.amount / 2 + 1);
+      const receiverSettltementReceipt = await receiverSettlementTx.wait();
+
+      const [rTransactionId, rTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverSettltementReceipt,
+      ).args;
+
+      // Receiver should not be able to accept his own proposal
+      await expect(
+        contract.connect(receiver).acceptSettlement(rTransactionId, rTransaction),
+      ).to.be.revertedWith("The caller must be the sender.");
+
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const receiverAcceptTx = await contract
+        .connect(sender)
+        .acceptSettlement(rTransactionId, rTransaction);
+      const receiverAcceptReceipt = await receiverAcceptTx.wait();
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.sender + (amount / 2 - 1)).to.equal(
+        tokensAfter.sender,
+        "Sender was not paid correctly",
+      );
+      expect(tokensBefore.receiver + (amount / 2 + 1)).to.equal(
+        tokensAfter.receiver,
+        "Receiver was not paid correctly",
+      );
+
+      const [sTransactionId, sTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverAcceptReceipt,
+      ).args;
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(sTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should not allow raising a dispute before settlementTimeout (Sender)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const receiverSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, amount);
+      const receiverSettltementReceipt = await receiverSettlementTx.wait();
+
+      await increaseTime(1);
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverSettltementReceipt,
+      ).args;
+
+      await expect(
+        contract
+          .connect(sender)
+          .payArbitrationFeeBySender(settlementTransactionId, settlementTransaction, {
+            value: arbitrationFee,
+          }),
+      ).to.be.revertedWith("Settlement period has not timed out yet");
+    });
+
+    it("Should not allow raising a dispute before settlementTimeout (Receiver)", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const receiverSettlementTx = await contract
+        .connect(receiver)
+        .proposeSettlement(transactionId, transaction, amount);
+      const receiverSettltementReceipt = await receiverSettlementTx.wait();
+
+      await increaseTime(1);
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverSettltementReceipt,
+      ).args;
+
+      await expect(
+        contract
+          .connect(receiver)
+          .payArbitrationFeeByReceiver(settlementTransactionId, settlementTransaction, {
+            value: arbitrationFee,
+          }),
+      ).to.be.revertedWith("Settlement period has not timed out yet");
+    });
+  });
   describe("Reimburse sender", () => {
     it("Should reimburse the sender and update the hash correctly", async () => {
       const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
@@ -979,6 +1200,254 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
         contract.connect(other).timeOutByReceiver(receiverFeeTransactionId, receiverFeeTransaction),
       ).to.be.revertedWith("Timeout time has not passed yet.");
     });
+
+    it("Should create settlement and rule correctly, making the sender the winner", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const senderSettle = amount - 400;
+      const receiverSettle = amount - 200;
+
+      // create settlement by sender
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, senderSettle);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      // create settlement by receiver and dispute
+      const [disputeID, disputeTransactionId, disputeTransaction] = await createDisputeHelper(
+        settlementTransactionId,
+        settlementTransaction,
+        arbitrationFee,
+        receiverSettle,
+      );
+
+      // Rule
+      await giveFinalRulingHelper(disputeID, DisputeRuling.Sender);
+
+      // Anyone can execute ruling
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+        disputeTransactionId,
+        disputeTransaction,
+        other,
+      );
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.sender + amount - senderSettle).to.equal(
+        tokensAfter.sender,
+        "Sender was not rewarded the settlement correctly",
+      );
+      expect(tokensBefore.receiver + senderSettle).to.equal(
+        tokensAfter.receiver,
+        "Receiver was not rewarded the settlement correctly",
+      );
+
+      expect(balancesBefore.sender.add(BigNumber.from(arbitrationFee))).to.equal(
+        balancesAfter.sender,
+        "Sender was not rewarded the settlment correctly",
+      );
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(ruleTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should create settlement and rule correctly, making the receiver the winner", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const senderSettle = amount - 400;
+      const receiverSettle = amount - 200;
+
+      // create settlement by sender
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, senderSettle);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      // create settlement by receiver and dispute
+      const [disputeID, disputeTransactionId, disputeTransaction] = await createDisputeHelper(
+        settlementTransactionId,
+        settlementTransaction,
+        arbitrationFee,
+        receiverSettle,
+      );
+
+      // Rule
+      await giveFinalRulingHelper(disputeID, DisputeRuling.Receiver);
+
+      // Anyone can execute ruling
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+        disputeTransactionId,
+        disputeTransaction,
+        other,
+      );
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.sender + amount - receiverSettle).to.equal(
+        tokensAfter.sender,
+        "Sender was not rewarded the settlement correctly",
+      );
+      expect(tokensBefore.receiver + receiverSettle).to.equal(
+        tokensAfter.receiver,
+        "Receiver was not rewarded the settlement correctly",
+      );
+
+      expect(balancesBefore.receiver.add(BigNumber.from(arbitrationFee))).to.equal(
+        balancesAfter.receiver,
+        "Receiver was not rewarded correctly",
+      );
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(ruleTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should reward correctly when settlement not proposed by the sender", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const receiverSettle = amount - 200;
+
+      // create settlement by receiver and dispute
+      const [disputeID, disputeTransactionId, disputeTransaction] = await createDisputeHelper(
+        transactionId,
+        transaction,
+        arbitrationFee,
+        receiverSettle,
+      );
+
+      // Rule
+      await giveFinalRulingHelper(disputeID, DisputeRuling.Sender);
+
+      // Anyone can execute ruling
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+        disputeTransactionId,
+        disputeTransaction,
+        other,
+      );
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.sender + amount).to.equal(
+        tokensAfter.sender,
+        "Sender was not rewarded correctly",
+      );
+      expect(tokensBefore.receiver).to.equal(tokensAfter.receiver, "Receiver must not be rewarded");
+
+      expect(balancesBefore.sender.add(BigNumber.from(arbitrationFee))).to.equal(
+        balancesAfter.sender,
+        "Sender was not rewarded correctly",
+      );
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(ruleTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
+
+    it("Should reward correctly when settlement not proposed by the receiver", async () => {
+      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
+
+      const senderSettle = amount - 400;
+
+      // create settlement by sender and raise dispute
+      const senderSettlementTx = await contract
+        .connect(sender)
+        .proposeSettlement(transactionId, transaction, senderSettle);
+      const senderSettltementReceipt = await senderSettlementTx.wait();
+      const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderSettltementReceipt,
+      ).args;
+
+      await increaseTime(100);
+
+      const receiverTxPromise = contract
+        .connect(receiver)
+        .payArbitrationFeeByReceiver(settlementTransactionId, settlementTransaction, {
+          value: arbitrationFee,
+        });
+      const receiverFeeTx = await receiverTxPromise;
+      const receiverFeeReceipt = await receiverFeeTx.wait();
+      expect(receiverTxPromise)
+        .to.emit(contract, "HasToPayFee")
+        .withArgs(transactionId, TransactionParty.Sender);
+      const [receiverFeeTransactionId, receiverFeeTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        receiverFeeReceipt,
+      ).args;
+      const txPromise = contract
+        .connect(sender)
+        .payArbitrationFeeBySender(receiverFeeTransactionId, receiverFeeTransaction, {
+          value: arbitrationFee,
+        });
+      const senderFeeTx = await txPromise;
+      const senderFeeReceipt = await senderFeeTx.wait();
+      const [senderFeeTransactionId, senderFeeTransaction] = getEmittedEvent(
+        "TransactionStateUpdated",
+        senderFeeReceipt,
+      ).args;
+      expect(txPromise)
+        .to.emit(contract, "Dispute")
+        .withArgs(
+          arbitrator.address,
+          senderFeeTransaction.disputeID,
+          senderFeeTransactionId,
+          senderFeeTransactionId,
+        );
+      expect(senderFeeTransaction.status).to.equal(
+        TransactionStatus.DisputeCreated,
+        "Invalid transaction status",
+      );
+
+      const disputeID = senderFeeTransaction.disputeID;
+      const disputeTransactionId = senderFeeTransactionId;
+      const disputeTransaction = senderFeeTransaction;
+
+      // Rule
+      await giveFinalRulingHelper(disputeID, DisputeRuling.Receiver);
+
+      // Anyone can execute ruling
+      const balancesBefore = await getBalances();
+      const tokensBefore = await getTokenBalances();
+      const [_ruleTransactionId, ruleTransaction] = await executeRulingHelper(
+        disputeTransactionId,
+        disputeTransaction,
+        other,
+      );
+      const balancesAfter = await getBalances();
+      const tokensAfter = await getTokenBalances();
+
+      expect(tokensBefore.receiver + amount).to.equal(
+        tokensAfter.receiver,
+        "Receiver was not rewarded correctly",
+      );
+      expect(tokensBefore.sender).to.equal(tokensAfter.sender, "sender must not be rewarded");
+
+      expect(balancesBefore.receiver.add(BigNumber.from(arbitrationFee))).to.equal(
+        balancesAfter.receiver,
+        "Receiver was not rewarded correctly",
+      );
+
+      const updatedHash = await contract.transactionHashes(transactionId - 1);
+      const expectedHash = await contract.hashTransactionState(ruleTransaction);
+      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
+    });
   });
 
   describe("Evidence", () => {
@@ -1034,6 +1503,8 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       const [disputeID2, disputeTransactionId2, disputeTransaction2] = await createDisputeHelper(
         transactionId2,
         transaction2,
+        arbitrationFee,
+        amount2,
       );
       await submitEvidenceHelper(
         disputeTransactionId1,
@@ -1864,11 +2335,16 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
    * @param {number} fee Appeal round from which to withdraw the rewards.
    * @returns {Array} Tx data.
    */
-  async function createDisputeHelper(_transactionId, _transaction, fee = arbitrationFee) {
+  async function createDisputeHelper(
+    _transactionId,
+    _transaction,
+    fee = arbitrationFee,
+    settlementAmount = amount,
+  ) {
     // Pay fees, create dispute and validate events.
     const receiverSettlementTx = await contract
       .connect(receiver)
-      .proposeSettlement(_transactionId, _transaction, _transaction.amount);
+      .proposeSettlement(_transactionId, _transaction, settlementAmount);
     const receiverSettltementReceipt = await receiverSettlementTx.wait();
 
     await increaseTime(100);

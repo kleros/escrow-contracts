@@ -2185,7 +2185,7 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     // Pay fees, create dispute and validate events.
     const receiverSettlementTx = await contract
       .connect(receiver)
-      .proposeSettlement(_transactionId, _transaction, BigNumber.from(settlementAmount));
+      .proposeSettlement(_transactionId, _transaction, settlementAmount);
     const receiverSettltementReceipt = await receiverSettlementTx.wait();
 
     await increaseTime(100);
