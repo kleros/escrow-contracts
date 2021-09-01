@@ -249,7 +249,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _timeoutPayment,
         address payable _receiver,
         string calldata _metaEvidence
-    ) public returns (uint256 transactionID) {
+    ) external returns (uint256 transactionID) {
         // Transfers token from sender wallet to contract.
         require(
             _token.transferFrom(msg.sender, address(this), _amount),
@@ -285,7 +285,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction memory _transaction,
         uint256 _amount
-    ) public onlyValidTransaction(_transactionID, _transaction) {
+    ) external onlyValidTransaction(_transactionID, _transaction) {
         require(_transaction.sender == msg.sender, "The caller must be the sender.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amount <= _transaction.amount, "Maximum amount available for payment exceeded.");
@@ -312,7 +312,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction memory _transaction,
         uint256 _amountReimbursed
-    ) public onlyValidTransaction(_transactionID, _transaction) {
+    ) external onlyValidTransaction(_transactionID, _transaction) {
         require(_transaction.receiver == msg.sender, "The caller must be the receiver.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(
@@ -336,7 +336,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function executeTransaction(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(block.timestamp >= _transaction.deadline, "Deadline not passed.");
@@ -448,7 +448,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function payArbitrationFeeBySender(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
@@ -497,7 +497,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function payArbitrationFeeByReceiver(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
@@ -545,7 +545,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function timeOutBySender(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(
@@ -584,7 +584,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function timeOutByReceiver(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(
@@ -669,7 +669,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction calldata _transaction,
         string calldata _evidence
-    ) public onlyValidTransactionCD(_transactionID, _transaction) {
+    ) external onlyValidTransactionCD(_transactionID, _transaction) {
         require(
             msg.sender == _transaction.sender || msg.sender == _transaction.receiver,
             "The caller must be the sender or the receiver."
@@ -692,7 +692,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction calldata _transaction,
         Party _side
-    ) public payable onlyValidTransactionCD(_transactionID, _transaction) {
+    ) external payable onlyValidTransactionCD(_transactionID, _transaction) {
         require(_side != Party.None, "Wrong party.");
         require(_transaction.status == Status.DisputeCreated, "No dispute to appeal");
 
@@ -833,7 +833,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction calldata _transaction,
         uint256 _round
-    ) public onlyValidTransactionCD(_transactionID, _transaction) {
+    ) external onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
             _transaction.disputeID
@@ -866,7 +866,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         Transaction calldata _transaction,
         uint256 _cursor,
         uint256 _count
-    ) public onlyValidTransactionCD(_transactionID, _transaction) {
+    ) external onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
             _transaction.disputeID
@@ -888,7 +888,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _ruling Ruling given by the arbitrator. Note that 0 is reserved
      *  for "Not able/wanting to make a decision".
      */
-    function rule(uint256 _disputeID, uint256 _ruling) public override {
+    function rule(uint256 _disputeID, uint256 _ruling) external override {
         require(msg.sender == address(arbitrator), "The caller must be the arbitrator.");
         require(_ruling <= AMOUNT_OF_CHOICES, "Invalid ruling.");
 
@@ -913,7 +913,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transaction The transaction state.
      */
     function executeRuling(uint256 _transactionID, Transaction memory _transaction)
-        public
+        external
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(_transaction.status == Status.DisputeCreated, "Invalid transaction status.");
@@ -1018,7 +1018,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         Transaction calldata _transaction,
         address _beneficiary
-    ) public view onlyValidTransactionCD(_transactionID, _transaction) returns (uint256 total) {
+    ) external view onlyValidTransactionCD(_transactionID, _transaction) returns (uint256 total) {
         if (_transaction.status != Status.Resolved) return total;
 
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
@@ -1057,7 +1057,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     /** @dev Getter to know the count of transactions.
      *  @return The count of transactions.
      */
-    function getCountTransactions() public view returns (uint256) {
+    function getCountTransactions() external view returns (uint256) {
         return transactionHashes.length;
     }
 
@@ -1065,7 +1065,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @param _transactionID The ID of the transaction.
      *  @return The number of rounds.
      */
-    function getNumberOfRounds(uint256 _transactionID) public view returns (uint256) {
+    function getNumberOfRounds(uint256 _transactionID) external view returns (uint256) {
         return roundsByTransactionID[_transactionID].length;
     }
 
@@ -1079,7 +1079,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
         uint256 _transactionID,
         uint256 _round,
         address _contributor
-    ) public view returns (uint256[3] memory contributions) {
+    ) external view returns (uint256[3] memory contributions) {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         contributions = round.contributions[_contributor];
     }
@@ -1090,7 +1090,7 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
      *  @return paidFees hasPaid feeRewards The round information.
      */
     function getRoundInfo(uint256 _transactionID, uint256 _round)
-        public
+        external
         view
         returns (
             uint256[3] memory paidFees,
