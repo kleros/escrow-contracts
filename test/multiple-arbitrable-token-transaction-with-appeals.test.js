@@ -1031,7 +1031,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
             value: arbitrationFee,
           }),
       ).to.be.revertedWith(
-        "Dispute has already been created or because the transaction has been executed.",
+        "Settlement not attempted first or the transaction already executed/disputed.",
       );
     });
 
@@ -1109,7 +1109,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
             value: arbitrationFee,
           }),
       ).to.be.revertedWith(
-        "Dispute has already been created or because the transaction has been executed.",
+        "Settlement not attempted first or the transaction already executed/disputed.",
       );
     });
 

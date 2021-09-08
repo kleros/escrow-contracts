@@ -43,7 +43,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         TransactionExecuted,
         TimeoutBySender,
         TimeoutByReceiver,
-        RulingEnforced
+        RulingEnforced,
+        SettlementReached
     }
 
     struct Transaction {
@@ -241,7 +242,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         transaction.sender = msg.sender;
         transaction.receiver = _receiver;
         transaction.amount = msg.value;
-        transaction.deadline = block.timestamp + _timeoutPayment;
+        transaction.deadline = block.timestamp.addCap(_timeoutPayment);
         transaction.lastInteraction = block.timestamp;
 
         transactionHashes.push(hashTransactionState(transaction));
@@ -398,7 +399,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
         emit TransactionStateUpdated(_transactionID, _transaction);
-        emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
+        emit TransactionResolved(_transactionID, Resolution.SettlementReached);
     }
 
     /** @dev Pay the arbitration fee to raise a dispute. To be called by the sender. UNTRUSTED.
@@ -413,7 +414,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
-        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        require(
+            _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
+            "Settlement not attempted first or the transaction already executed/disputed."
+        );
         if (
             _transaction.status == Status.WaitingSettlementSender ||
             _transaction.status == Status.WaitingSettlementReceiver
@@ -424,10 +428,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             );
         }
 
-        require(
-            _transaction.status < Status.DisputeCreated,
-            "Dispute has already been created or because the transaction has been executed."
-        );
         require(msg.sender == _transaction.sender, "The caller must be the sender.");
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
@@ -464,7 +464,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         payable
         onlyValidTransaction(_transactionID, _transaction)
     {
-        require(_transaction.status != Status.NoDispute, "Settlement not attempted first");
+        require(
+            _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
+            "Settlement not attempted first or the transaction already executed/disputed."
+        );
         if (
             _transaction.status == Status.WaitingSettlementSender ||
             _transaction.status == Status.WaitingSettlementReceiver
@@ -475,10 +478,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             );
         }
 
-        require(
-            _transaction.status < Status.DisputeCreated,
-            "Dispute has already been created or because the transaction has been executed."
-        );
         require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
@@ -529,6 +528,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         // It is the user responsibility to accept ETH.
         _transaction.sender.send(_transaction.senderFee + _transaction.amount);
         _transaction.amount = 0;
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
         _transaction.senderFee = 0;
         _transaction.status = Status.Resolved;
 
@@ -562,6 +563,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         // It is the user responsibility to accept ETH.
         _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
         _transaction.amount = 0;
+        _transaction.settlementSender = 0;
+        _transaction.settlementReceiver = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
 
@@ -999,7 +1002,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     /** @dev Gets the information on a round of a transaction.
      *  @param _transactionID The ID of the transaction.
      *  @param _round The round to query.
-     *  @return paidFees sideFunded feeRewards appealed The round information.
+     *  @return paidFees
+     *          sideFunded
+     *          feeRewards
+     *          appealed
      */
     function getRoundInfo(uint256 _transactionID, uint256 _round)
         external
@@ -1034,6 +1040,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.sender,
                     _transaction.receiver,
                     _transaction.amount,
+                    _transaction.settlementSender,
+                    _transaction.settlementReceiver,
                     _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
@@ -1062,6 +1070,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.sender,
                     _transaction.receiver,
                     _transaction.amount,
+                    _transaction.settlementSender,
+                    _transaction.settlementReceiver,
                     _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
