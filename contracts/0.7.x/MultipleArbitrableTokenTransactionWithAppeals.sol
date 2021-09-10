@@ -358,8 +358,8 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
     }
 
     /** @notice Propose a settlement as a compromise from the initial terms to the other party.
-     *  @dev A party can only propose a settlement again after the other party has
-     *  done so as well to prevent front running attacks on acceptProposal.
+     *  @dev Frontrunning acceptSettlement by calling proposeSettlement
+     *  just before will fail as then the onlyValidTransaction validity check will revert.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amount The settlement amount.
@@ -379,23 +379,13 @@ contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence
             "Settlement amount cannot be more that the initial amount"
         );
 
-        if (_transaction.status == Status.WaitingSettlementSender) {
-            require(msg.sender == _transaction.sender, "The caller must be the sender.");
+        if (msg.sender == _transaction.sender) {
             _transaction.settlementSender = _amount;
             _transaction.status = Status.WaitingSettlementReceiver;
-        } else if (_transaction.status == Status.WaitingSettlementReceiver) {
-            require(msg.sender == _transaction.receiver, "The caller must be the receiver.");
+        } else if (msg.sender == _transaction.receiver) {
             _transaction.settlementReceiver = _amount;
             _transaction.status = Status.WaitingSettlementSender;
-        } else {
-            if (msg.sender == _transaction.sender) {
-                _transaction.settlementSender = _amount;
-                _transaction.status = Status.WaitingSettlementReceiver;
-            } else if (msg.sender == _transaction.receiver) {
-                _transaction.settlementReceiver = _amount;
-                _transaction.status = Status.WaitingSettlementSender;
-            } else revert("Only the sender or receiver addresses are authorized");
-        }
+        } else revert("Only the sender or receiver addresses are authorized");
 
         _transaction.lastInteraction = block.timestamp;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
