@@ -215,58 +215,6 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
     });
 
-    it("Should not be possible for to propose a settlement consecutively (Sender)", async () => {
-      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
-
-      // Propose once
-      const senderSettlementTx = await contract
-        .connect(sender)
-        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
-      const senderSettltementReceipt = await senderSettlementTx.wait();
-
-      const [sTransactionId, sTransaction] = getEmittedEvent(
-        "TransactionStateUpdated",
-        senderSettltementReceipt,
-      ).args;
-
-      // Try proposing again
-      await expect(
-        contract
-          .connect(sender)
-          .proposeSettlement(sTransactionId, sTransaction, transaction.amount / 2 - 1),
-      ).to.be.revertedWith("The caller must be the receiver.");
-
-      const updatedHash = await contract.transactionHashes(transactionId - 1);
-      const expectedHash = await contract.hashTransactionState(sTransaction);
-      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
-    });
-
-    it("Should not be possible for to propose a settlement consecutively (Receiver)", async () => {
-      const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
-
-      // Propose once
-      const receiverSettlementTx = await contract
-        .connect(receiver)
-        .proposeSettlement(transactionId, transaction, transaction.amount / 2);
-      const receiverSettltementReceipt = await receiverSettlementTx.wait();
-
-      const [rTransactionId, rTransaction] = getEmittedEvent(
-        "TransactionStateUpdated",
-        receiverSettltementReceipt,
-      ).args;
-
-      // Try proposing again
-      await expect(
-        contract
-          .connect(receiver)
-          .proposeSettlement(rTransactionId, rTransaction, transaction.amount / 2 - 1),
-      ).to.be.revertedWith("The caller must be the sender.");
-
-      const updatedHash = await contract.transactionHashes(transactionId - 1);
-      const expectedHash = await contract.hashTransactionState(rTransaction);
-      expect(updatedHash).to.equal(expectedHash, "Hash was not updated correctly");
-    });
-
     it("Should not propose a settlement amount greater than the original", async () => {
       const [_receipt, transactionId, transaction] = await createTransactionHelper(amount);
 
