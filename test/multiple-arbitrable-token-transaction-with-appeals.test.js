@@ -17,7 +17,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
   const arbitratorExtraData = "0x85";
   const appealTimeout = 100;
   const feeTimeout = 100;
-  const settlmentTimeout = 100;
+  const settlementTimeout = 10;
   const timeoutPayment = 100;
   const amount = 1000;
   const sharedMultiplier = 5000;
@@ -80,7 +80,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       arbitrator.address,
       arbitratorExtraData,
       feeTimeout,
-      settlmentTimeout,
+      settlementTimeout,
       sharedMultiplier,
       winnerMultiplier,
       loserMultiplier,
@@ -164,15 +164,11 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(transaction.status).to.equal(TransactionStatus.NoDispute, "Invalid status");
       expect(transaction.sender).to.equal(senderAddress, "Invalid sender address");
       expect(transaction.receiver).to.equal(receiverAddress, "Invalid receiver address");
-      expect(Number(transaction.lastInteraction)).to.be.closeTo(
-        currentTime,
-        10,
-        "Invalid last interaction",
-      );
+      expect(Number(transaction.lastInteraction)).to.be.closeTo(0, 10, "Invalid last interaction");
       expect(transaction.amount).to.equal(amount, "Invalid transaction amount");
       expect(transaction.token).to.equal(token.address, "Invalid token address");
       expect(transaction.deadline).to.equal(
-        BigNumber.from(timeoutPayment).add(transaction.lastInteraction),
+        BigNumber.from(timeoutPayment).add(currentTime + 1),
         "Wrong deadline",
       );
       expect(transaction.disputeID).to.equal(0, "Invalid dispute ID");
@@ -420,11 +416,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(rTransaction.status).to.equal(transaction.status, "Invalid status");
       expect(rTransaction.sender).to.equal(senderAddress, "Invalid sender address");
       expect(rTransaction.receiver).to.equal(receiverAddress, "Invalid receiver address");
-      expect(Number(rTransaction.lastInteraction)).to.be.closeTo(
-        currentTime,
-        10,
-        "Invalid last interaction",
-      );
+      expect(Number(rTransaction.lastInteraction)).to.be.closeTo(0, 10, "Invalid last interaction");
       expect(rTransaction.amount).to.equal(0, "Invalid transaction amount");
       expect(rTransaction.token).to.equal(token.address, "Invalid token address");
       expect(rTransaction.deadline).to.equal(transaction.deadline, "Wrong deadline");
@@ -513,7 +505,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(payTransaction.sender).to.equal(senderAddress, "Invalid sender address");
       expect(payTransaction.receiver).to.equal(receiverAddress, "Invalid receiver address");
       expect(Number(payTransaction.lastInteraction)).to.be.closeTo(
-        currentTime,
+        0,
         10,
         "Invalid last interaction",
       );
@@ -2295,7 +2287,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       .proposeSettlement(_transactionId, _transaction, settlementAmount);
     const receiverSettltementReceipt = await receiverSettlementTx.wait();
 
-    await increaseTime(100);
+    await increaseTime(settlementTimeout);
 
     const [settlementTransactionId, settlementTransaction] = getEmittedEvent(
       "TransactionStateUpdated",
@@ -2351,25 +2343,20 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
    */
   async function submitEvidenceHelper(transactionId, transaction, evidence, caller) {
     const callerAddress = await caller.getAddress();
-    if (callerAddress === transaction.sender || callerAddress === transaction.receiver)
-      if (transaction.status !== TransactionStatus.Resolved) {
-        const txPromise = contract
-          .connect(caller)
-          .submitEvidence(transactionId, transaction, evidence);
-        const tx = await txPromise;
-        await tx.wait();
-        expect(txPromise)
-          .to.emit(contract, "Evidence")
-          .withArgs(arbitrator.address, transactionId, callerAddress, evidence);
-      } else {
-        await expect(
-          contract.connect(caller).submitEvidence(transactionId, transaction, evidence),
-        ).to.be.revertedWith("Must not send evidence if the dispute is resolved.");
-      }
-    else
+    if (transaction.status !== TransactionStatus.Resolved) {
+      const txPromise = contract
+        .connect(caller)
+        .submitEvidence(transactionId, transaction, evidence);
+      const tx = await txPromise;
+      await tx.wait();
+      expect(txPromise)
+        .to.emit(contract, "Evidence")
+        .withArgs(arbitrator.address, transactionId, callerAddress, evidence);
+    } else {
       await expect(
         contract.connect(caller).submitEvidence(transactionId, transaction, evidence),
-      ).to.be.revertedWith("The caller must be the sender or the receiver.");
+      ).to.be.revertedWith("Must not send evidence if the dispute is resolved.");
+    }
   }
 
   /**
