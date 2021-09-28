@@ -1,6 +1,6 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
- *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1]
+ *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1*, @alcercu*, @fnanni-0]
  *  @auditors: []
  *  @bounties: []
  */
@@ -243,7 +243,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         transaction.receiver = _receiver;
         transaction.amount = msg.value;
         transaction.deadline = block.timestamp.addCap(_timeoutPayment);
-        transaction.lastInteraction = block.timestamp;
 
         transactionHashes.push(hashTransactionState(transaction));
         // transactionID starts at 1. This way, TransactionDispute can check
@@ -336,6 +335,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint256 _amount
     ) external onlyValidTransaction(_transactionID, _transaction) {
         require(
+            block.timestamp < _transaction.deadline || _transaction.status != Status.NoDispute,
+            "Transaction expired"
+        );
+        require(
             _transaction.status < Status.WaitingSender,
             "Transaction already escalated for arbitration"
         );
@@ -408,10 +411,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
             "Settlement not attempted first or the transaction already executed/disputed."
         );
-        if (
-            _transaction.status == Status.WaitingSettlementSender ||
-            _transaction.status == Status.WaitingSettlementReceiver
-        ) {
+
+        // Allow the other party enough time to respond to a settlement before
+        // allowing the proposer to raise a dispute.
+        if (_transaction.status == Status.WaitingSettlementReceiver) {
             require(
                 block.timestamp - _transaction.lastInteraction >= settlementTimeout,
                 "Settlement period has not timed out yet."
@@ -458,10 +461,10 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
             "Settlement not attempted first or the transaction already executed/disputed."
         );
-        if (
-            _transaction.status == Status.WaitingSettlementSender ||
-            _transaction.status == Status.WaitingSettlementReceiver
-        ) {
+
+        // Allow the other party enough time to respond to a settlement before
+        // allowing the proposer to raise a dispute.
+        if (_transaction.status == Status.WaitingSettlementSender) {
             require(
                 block.timestamp - _transaction.lastInteraction >= settlementTimeout,
                 "Settlement period has not timed out yet."
@@ -614,10 +617,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         Transaction calldata _transaction,
         string calldata _evidence
     ) external onlyValidTransactionCD(_transactionID, _transaction) {
-        require(
-            msg.sender == _transaction.sender || msg.sender == _transaction.receiver,
-            "The caller must be the sender or the receiver."
-        );
         require(
             _transaction.status < Status.Resolved,
             "Must not send evidence if the dispute is resolved."
