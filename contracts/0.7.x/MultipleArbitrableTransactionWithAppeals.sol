@@ -1,11 +1,11 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
- *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1*, @alcercu*, @fnanni-0]
+ *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
  *  @auditors: []
  *  @bounties: []
  */
 
-pragma solidity ~0.7.1;
+pragma solidity ~0.7.6;
 pragma experimental ABIEncoderV2;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
@@ -76,7 +76,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      * @dev Tracks the state of eventual disputes.
      */
     struct TransactionDispute {
-        uint240 transactionID; // The transaction ID.
+        uint256 transactionID; // The transaction ID.
         bool hasRuling; // Required to differentiate between having no ruling and a RefusedToRule ruling.
         Party ruling; // The ruling given by the arbitrator.
     }
@@ -418,7 +418,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(
-            _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
+            _transaction.status == Status.WaitingSettlementSender ||
+                _transaction.status == Status.WaitingSettlementReceiver ||
+                _transaction.status == Status.WaitingSender,
             "Settlement not attempted first or the transaction already executed/disputed."
         );
 
@@ -468,7 +470,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         onlyValidTransaction(_transactionID, _transaction)
     {
         require(
-            _transaction.status > Status.NoDispute && _transaction.status < Status.DisputeCreated,
+            _transaction.status == Status.WaitingSettlementSender ||
+                _transaction.status == Status.WaitingSettlementReceiver ||
+                _transaction.status == Status.WaitingReceiver,
             "Settlement not attempted first or the transaction already executed/disputed."
         );
 
@@ -599,7 +603,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
             _transaction.disputeID
         ];
-        transactionDispute.transactionID = uint240(_transactionID);
+        transactionDispute.transactionID = _transactionID;
         emit Dispute(arbitrator, _transaction.disputeID, _transactionID, _transactionID);
 
         // Refund sender if it overpaid.
@@ -846,7 +850,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(transactionDispute.transactionID != 0, "Dispute does not exist.");
         require(transactionDispute.hasRuling == false, " Dispute already resolved.");
 
-        Round[] storage rounds = roundsByTransactionID[uint256(transactionDispute.transactionID)];
+        Round[] storage rounds = roundsByTransactionID[transactionDispute.transactionID];
         Round storage round = rounds[rounds.length - 1];
 
         // If only one side paid its fees we assume the ruling to be in its favor.
