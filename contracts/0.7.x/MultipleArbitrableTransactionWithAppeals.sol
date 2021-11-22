@@ -1,6 +1,6 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
- *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
+ *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu, @fnanni-0*]
  *  @auditors: []
  *  @bounties: []
  */
@@ -249,9 +249,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         // if a dispute exists by testing transactionID != 0.
         transactionID = transactionHashes.length;
 
-        emit MetaEvidence(transactionID, _metaEvidence);
         emit TransactionCreated(transactionID, msg.sender, _receiver, msg.value);
         emit TransactionStateUpdated(transactionID, transaction);
+        emit MetaEvidence(transactionID, _metaEvidence);
     }
 
     /** @dev Pay receiver. To be called if the good or service is provided.
