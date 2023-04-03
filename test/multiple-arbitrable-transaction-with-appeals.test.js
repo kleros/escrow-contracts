@@ -45,7 +45,7 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     receiverAddress = await receiver.getAddress();
 
     const arbitratorArtifact = await readArtifact(
-      "./artifacts/0.4.x",
+      "./artifacts",
       "EnhancedAppealableArbitrator",
     );
     const Arbitrator = await ethers.getContractFactory(
@@ -63,7 +63,7 @@ describe("MultipleArbitrableTransactionWithAppeals contract", async () => {
     await arbitrator.changeArbitrator(arbitrator.address);
 
     const contractArtifact = await readArtifact(
-      "./artifacts/0.7.x",
+      "./artifacts",
       "MultipleArbitrableTransactionWithAppeals",
     );
     const MultipleArbitrableTransaction = await ethers.getContractFactory(

@@ -46,7 +46,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
     receiverAddress = await receiver.getAddress();
 
     const arbitratorArtifact = await readArtifact(
-      "./artifacts/0.4.x",
+      "./artifacts",
       "EnhancedAppealableArbitrator",
     );
     const Arbitrator = await ethers.getContractFactory(
@@ -63,13 +63,13 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
     // Make appeals go to the same arbitrator
     await arbitrator.changeArbitrator(arbitrator.address);
 
-    const tokenArtifact = await readArtifact("./artifacts/0.4.x", "ERC20Mock");
+    const tokenArtifact = await readArtifact("./artifacts", "ERC20Mock");
     const ERC20Token = await ethers.getContractFactory(tokenArtifact.abi, tokenArtifact.bytecode);
-    token = await ERC20Token.deploy(senderAddress, amount * 10); // (initial account, initial balance)
+    token = await ERC20Token.deploy(senderAddress, amount * 10, "Pinakion", "PNK"); // (initial account, initial balance)
     await token.deployed();
 
     const contractArtifact = await readArtifact(
-      "./artifacts/0.7.x",
+      "./artifacts",
       "MultipleArbitrableTokenTransactionWithAppeals",
     );
     const MultipleArbitrableTransaction = await ethers.getContractFactory(

@@ -5,15 +5,23 @@
  *  @bounties: []
  */
 
-pragma solidity ~0.7.6;
+pragma solidity ^0.8;
 pragma experimental ABIEncoderV2;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
-import "@kleros/ethereum-libraries/contracts/CappedMath.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./libraries/CappedMath.sol";
 
-contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
+/** @title Multiple Arbitrable ERC20 Token Transaction
+ *  This is a contract for multiple arbitrated token transactions which can
+ *  be reversed by an arbitrator.
+ *  This can be used for buying goods, services and for paying freelancers.
+ *  Parties are identified as "sender" and "receiver".
+ *  This version of the contract supports appeal crowdfunding.
+ */
+contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence {
     using CappedMath for uint256;
 
     // **************************** //
@@ -28,7 +36,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         Sender,
         Receiver
     }
-
     enum Status {
         NoDispute,
         WaitingSettlementSender,
@@ -38,7 +45,6 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         DisputeCreated,
         Resolved
     }
-
     enum Resolution {
         TransactionExecuted,
         TimeoutBySender,
@@ -53,6 +59,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint256 amount;
         uint256 settlementSender; // Settlement amount proposed by the sender
         uint256 settlementReceiver; // Settlement amount proposed by the receiver
+        IERC20 token;
         uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
         uint256 senderFee; // Total fees paid by the sender.
@@ -63,13 +70,13 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
     struct Round {
         uint256[3] paidFees; // Tracks the fees paid by each side in this round.
-        // If the round is appealed, i.e. this is not the last round, Party.None means that both sides have paid.
+        // If the round is appealed, i.e. this is not the last round,
+        // Party.None means that both sides have paid.
         Party sideFunded;
         // Sum of reimbursable fees and stake rewards available to the parties
         // that made contributions to the side that ultimately wins a dispute.
         uint256 feeRewards;
-        // Maps contributors to their contributions for each side.
-        mapping(address => uint256[3]) contributions;
+        mapping(address => uint256[3]) contributions; // Maps contributors to their contributions for each side.
     }
 
     /**
@@ -137,17 +144,19 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _transactionID The index of the transaction.
      *  @param _sender The address of the sender.
      *  @param _receiver The address of the receiver.
+     *  @param _token The token address.
      *  @param _amount The initial amount in the transaction.
      */
     event TransactionCreated(
         uint256 indexed _transactionID,
         address indexed _sender,
         address indexed _receiver,
+        IERC20 _token,
         uint256 _amount
     );
 
-    /** @dev To be emitted when a transaction is resolved, either by its
-     *  execution, a timeout or because a ruling was enforced.
+    /** @dev To be emitted when a transaction is resolved, either by its execution,
+     *       a timeout or because a ruling was enforced.
      *  @param _transactionID The ID of the respective transaction.
      *  @param _resolution Short description of what caused the transaction to be solved.
      */
@@ -184,12 +193,12 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _feeTimeout Arbitration fee timeout for the parties.
      *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
-     *  submitter must pay for a round when there is no winner/loser in the
-     *  previous round. In basis points.
-     *  @param _winnerStakeMultiplier Multiplier of the appeal cost that the
-     *  winner has to pay for a round. In basis points.
-     *  @param _loserStakeMultiplier Multiplier of the appeal cost that the
-     *  loser has to pay for a round. In basis points.
+     *  submitter must pay for a round when there is no winner/loser in
+     *  the previous round. In basis points.
+     *  @param _winnerStakeMultiplier Multiplier of the appeal cost that the winner
+     *  has to pay for a round. In basis points.
+     *  @param _loserStakeMultiplier Multiplier of the appeal cost that the loser
+     *  has to pay for a round. In basis points.
      */
     constructor(
         IArbitrator _arbitrator,
@@ -218,7 +227,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     }
 
     /// @dev Using calldata as data location makes gas consumption more efficient
-    /// when caller function also uses calldata.
+    ///      when caller function also uses calldata.
     modifier onlyValidTransactionCD(uint256 _transactionID, Transaction calldata _transaction) {
         require(
             transactionHashes[_transactionID - 1] == hashTransactionStateCD(_transaction),
@@ -227,34 +236,47 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _;
     }
 
-    /** @dev Create a transaction.
-     *  @param _timeoutPayment Time after which a party can automatically execute the arbitrable transaction.
+    /** @dev Create a transaction. UNTRUSTED.
+     *  @param _amount The amount of tokens in this transaction.
+     *  @param _token The ERC20 token contract.
+     *  @param _timeoutPayment Time after which a party automatically loses a dispute.
      *  @param _receiver The recipient of the transaction.
      *  @param _metaEvidence Link to the meta-evidence.
      *  @return transactionID The index of the transaction.
      */
     function createTransaction(
+        uint256 _amount,
+        IERC20 _token,
         uint256 _timeoutPayment,
         address payable _receiver,
         string calldata _metaEvidence
-    ) external payable returns (uint256 transactionID) {
+    ) external returns (uint256 transactionID) {
+        // Transfers token from sender wallet to contract.
+        require(
+            _token.transferFrom(msg.sender, address(this), _amount),
+            "Sender does not have enough approved funds."
+        );
+
         Transaction memory transaction;
-        transaction.sender = msg.sender;
+        transaction.sender = payable(msg.sender);
         transaction.receiver = _receiver;
-        transaction.amount = msg.value;
+        transaction.amount = _amount;
+        transaction.token = _token;
         transaction.deadline = block.timestamp.addCap(_timeoutPayment);
 
         transactionHashes.push(hashTransactionState(transaction));
-        // transactionID starts at 1. This way, TransactionDispute can check
-        // if a dispute exists by testing transactionID != 0.
+        // transactionID starts at 1. This way, TransactionDispute can check if
+        // a dispute exists by testing transactionID != 0.
         transactionID = transactionHashes.length;
 
-        emit TransactionCreated(transactionID, msg.sender, _receiver, msg.value);
+        emit TransactionCreated(transactionID, msg.sender, _receiver, _token, _amount);
         emit TransactionStateUpdated(transactionID, transaction);
         emit MetaEvidence(transactionID, _metaEvidence);
     }
 
-    /** @dev Pay receiver. To be called if the good or service is provided.
+    /** @notice Pay receiver. To be called if the good or service is provided.
+     *  Can only be called by the sender.
+     *  @dev UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amount Amount to pay in wei.
@@ -268,15 +290,20 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amount <= _transaction.amount, "Maximum amount available for payment exceeded.");
 
-        _transaction.receiver.send(_amount); // It is the user responsibility to accept ETH.
         _transaction.amount -= _amount;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        require(
+            _transaction.token.transfer(_transaction.receiver, _amount),
+            "The `transfer` function must not fail."
+        );
         emit Payment(_transactionID, _amount, msg.sender);
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @dev Reimburse sender. To be called if the good or service can't be fully provided.
+    /** @notice Reimburse sender. To be called if the good or service can't be fully provided.
+     *  Can only be called by the receiver.
+     *  @dev UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _amountReimbursed Amount to reimburse in wei.
@@ -293,15 +320,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             "Maximum reimbursement available exceeded."
         );
 
-        _transaction.sender.send(_amountReimbursed); // It is the user responsibility to accept ETH.
         _transaction.amount -= _amountReimbursed;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        require(
+            _transaction.token.transfer(_transaction.sender, _amountReimbursed),
+            "The `transfer` function must not fail."
+        );
         emit Payment(_transactionID, _amountReimbursed, msg.sender);
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @dev Transfer the transaction's amount to the receiver if the timeout has passed.
+    /** @dev Transfer the transaction's amount to the receiver if the timeout has passed. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -312,12 +342,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(block.timestamp >= _transaction.deadline, "Deadline not passed.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
 
-        _transaction.receiver.send(_transaction.amount); // It is the user responsibility to accept ETH.
+        uint256 amount = _transaction.amount;
         _transaction.amount = 0;
-
         _transaction.status = Status.Resolved;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        require(
+            _transaction.token.transfer(_transaction.receiver, amount),
+            "The `transfer` function must not fail."
+        );
+
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
@@ -395,12 +429,17 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.settlementReceiver = 0;
 
         _transaction.status = Status.Resolved;
-
-        // It is the users responsibility to accept ETH.
-        _transaction.sender.send(remainingAmount);
-        _transaction.receiver.send(settlementAmount);
-
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+
+        require(
+            _transaction.token.transfer(_transaction.sender, remainingAmount),
+            "The `transfer` function must not fail."
+        );
+        require(
+            _transaction.token.transfer(_transaction.receiver, settlementAmount),
+            "The `transfer` function must not fail."
+        );
+
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.SettlementReached);
     }
@@ -437,16 +476,14 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
         _transaction.senderFee += msg.value;
-        // Require that the total pay at least the arbitration cost.
+        // Require that the total paid to be at least the arbitration cost.
         require(
             _transaction.senderFee >= arbitrationCost,
             "The sender fee must cover arbitration costs."
         );
 
         _transaction.lastInteraction = block.timestamp;
-
-        // The receiver still has to pay. This can also happen if he has paid,
-        // but arbitrationCost has increased.
+        // The receiver still has to pay. This can also happen if he has paid, but `arbitrationCost` has increased.
         if (_transaction.receiverFee < arbitrationCost) {
             _transaction.status = Status.WaitingReceiver;
             emit HasToPayFee(_transactionID, Party.Receiver);
@@ -496,8 +533,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         );
 
         _transaction.lastInteraction = block.timestamp;
-        // The sender still has to pay. This can also happen if he has paid,
-        // but arbitrationCost has increased.
+        // The sender still has to pay. This can also happen if he has paid, but arbitrationCost has increased.
         if (_transaction.senderFee < arbitrationCost) {
             _transaction.status = Status.WaitingSender;
             emit HasToPayFee(_transactionID, Party.Sender);
@@ -510,7 +546,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
-    /** @dev Reimburse sender if receiver fails to pay the fee.
+    /** @dev Reimburse sender if receiver fails to pay the fee. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -532,20 +568,26 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             _transaction.receiverFee = 0;
         }
 
-        // It is the user responsibility to accept ETH.
-        _transaction.sender.send(_transaction.senderFee + _transaction.amount);
+        uint256 amount = _transaction.amount;
+        uint256 senderFee = _transaction.senderFee;
+
         _transaction.amount = 0;
         _transaction.settlementSender = 0;
         _transaction.settlementReceiver = 0;
         _transaction.senderFee = 0;
         _transaction.status = Status.Resolved;
-
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+
+        require(
+            _transaction.token.transfer(_transaction.sender, amount),
+            "The `transfer` function must not fail."
+        );
+        _transaction.sender.send(senderFee); // It is the user responsibility to accept ETH.
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TimeoutBySender);
     }
 
-    /** @dev Pay receiver if sender fails to pay the fee.
+    /** @dev Pay receiver if sender fails to pay the fee. UNTRUSTED
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      */
@@ -567,24 +609,31 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             _transaction.senderFee = 0;
         }
 
-        // It is the user responsibility to accept ETH.
-        _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
+        uint256 amount = _transaction.amount;
+        uint256 receiverFee = _transaction.receiverFee;
+
         _transaction.amount = 0;
         _transaction.settlementSender = 0;
         _transaction.settlementReceiver = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
-
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+
+        require(
+            _transaction.token.transfer(_transaction.receiver, amount),
+            "The `transfer` function must not fail."
+        );
+        _transaction.receiver.send(receiverFee); // It is the user responsibility to accept ETH.
+
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TimeoutByReceiver);
     }
 
     /** @dev Create a dispute. UNTRUSTED.
-     *  This function is internal and thus the transaction state validity is
-     *  not checked. Caller functions MUST do the check before calling this function.
-     *  _transaction MUST be a reference (not a copy) because its state is
-     *  modified. Caller functions MUST emit the TransactionStateUpdated event and update the hash.
+     *  This function is internal and thus the transaction state validity is not checked.
+     *  Caller functions MUST do the check before calling this function.
+     *  _transaction MUST be a reference (not a copy) because its state is modified.
+     *  Caller functions MUST emit the TransactionStateUpdated event and update the hash.
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _arbitrationCost Amount to pay the arbitrator.
@@ -684,7 +733,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / MULTIPLIER_DIVISOR);
 
         // Take up to the amount necessary to fund the current round at the current costs.
-        (uint256 contribution, uint256 remainingETH) = calculateContribution(
+        uint256 contribution; // Amount contributed.
+        uint256 remainingETH; // Remaining ETH to send back.
+        (contribution, remainingETH) = calculateContribution(
             msg.value,
             totalCost.subCap(round.paidFees[uint256(_side)])
         );
@@ -694,7 +745,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         emit AppealContribution(_transactionID, _side, msg.sender, contribution);
 
         // Reimburse leftover ETH if any.
-        if (remainingETH > 0) msg.sender.send(remainingETH); // It is the user responsibility to accept ETH.
+        // Deliberate use of send in order to not block the contract in case of reverting fallback.
+        if (remainingETH > 0) payable(msg.sender).send(remainingETH);
 
         if (round.paidFees[uint256(_side)] >= totalCost) {
             if (round.sideFunded == Party.None) {
@@ -729,7 +781,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         return (_requiredAmount, remainder);
     }
 
-    /** @dev Updates the state of contributions of appeal rounds which are going to be withdrawn.
+    /** @dev Updates contributions of appeal rounds which are going to be withdrawn.
      *  Caller functions MUST:
      *  (1) check that the transaction is valid and Resolved
      *  (2) send the rewards to the _beneficiary.
@@ -775,8 +827,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
     /** @dev Withdraws contributions of appeal rounds. Reimburses contributions
      *  if the appeal was not fully funded.
-     *  If the appeal was fully funded, sends the fee stake rewards and
-     *  reimbursements proportional to the contributions made to the winner of a dispute.
+     *  If the appeal was fully funded, sends the fee stake rewards and reimbursements
+     *  proportional to the contributions made to the winner of a dispute.
      *  @param _beneficiary The address that made contributions.
      *  @param _transactionID The ID of the associated transaction.
      *  @param _transaction The transaction state.
@@ -877,35 +929,11 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         ];
         require(transactionDispute.hasRuling, "Arbitrator has not ruled yet.");
 
-        // Give the arbitration fee back.
-        // Note that we use send to prevent a party from blocking the execution.
-        if (transactionDispute.ruling == Party.Sender) {
-            // If there was a settlement amount proposed
-            // we use that to make the partial payment and refund the rest
-            if (_transaction.settlementSender != 0) {
-                _transaction.sender.send(
-                    _transaction.senderFee + _transaction.amount - _transaction.settlementSender
-                );
-                _transaction.receiver.send(_transaction.settlementSender);
-            } else {
-                _transaction.sender.send(_transaction.senderFee + _transaction.amount);
-            }
-        } else if (transactionDispute.ruling == Party.Receiver) {
-            // If there was a settlement amount proposed
-            // we use that to make the partial payment and refund the rest to sender
-            if (_transaction.settlementReceiver != 0) {
-                _transaction.sender.send(_transaction.amount - _transaction.settlementReceiver);
-                _transaction.receiver.send(
-                    _transaction.receiverFee + _transaction.settlementReceiver
-                );
-            } else {
-                _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
-            }
-        } else {
-            uint256 splitAmount = (_transaction.senderFee + _transaction.amount) / 2;
-            _transaction.sender.send(splitAmount);
-            _transaction.receiver.send(splitAmount);
-        }
+        uint256 amount = _transaction.amount;
+        uint256 settlementSender = _transaction.settlementSender;
+        uint256 settlementReceiver = _transaction.settlementReceiver;
+        uint256 senderFee = _transaction.senderFee;
+        uint256 receiverFee = _transaction.receiverFee;
 
         _transaction.amount = 0;
         _transaction.settlementSender = 0;
@@ -913,8 +941,68 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         _transaction.senderFee = 0;
         _transaction.receiverFee = 0;
         _transaction.status = Status.Resolved;
+        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
-        transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        // Give the arbitration fee back.
+        // Note that we use `send` to prevent a party from blocking the execution.
+        if (transactionDispute.ruling == Party.Sender) {
+            _transaction.sender.send(senderFee);
+
+            // If there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest to sender
+            if (settlementSender != 0) {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount - settlementSender),
+                    "The `transfer` function must not fail."
+                );
+                require(
+                    _transaction.token.transfer(_transaction.receiver, settlementSender),
+                    "The `transfer` function must not fail."
+                );
+            } else {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount),
+                    "The `transfer` function must not fail."
+                );
+            }
+        } else if (transactionDispute.ruling == Party.Receiver) {
+            _transaction.receiver.send(receiverFee);
+
+            // If there was a settlement amount proposed
+            // we use that to make the partial payment and refund the rest to sender
+            if (settlementReceiver != 0) {
+                require(
+                    _transaction.token.transfer(_transaction.sender, amount - settlementReceiver),
+                    "The `transfer` function must not fail."
+                );
+                require(
+                    _transaction.token.transfer(_transaction.receiver, settlementReceiver),
+                    "The `transfer` function must not fail."
+                );
+            } else {
+                require(
+                    _transaction.token.transfer(_transaction.receiver, amount),
+                    "The `transfer` function must not fail."
+                );
+            }
+        } else {
+            // `senderFee` and `receiverFee` are equal to the arbitration cost.
+            uint256 splitArbitrationFee = senderFee / 2;
+            _transaction.receiver.send(splitArbitrationFee);
+            _transaction.sender.send(splitArbitrationFee);
+            // Tokens should not reenter or allow recipients to refuse the transfer.
+            // In the case of an uneven token amount, one basic token unit can be burnt.
+            uint256 splitAmount = amount / 2;
+            require(
+                _transaction.token.transfer(_transaction.receiver, splitAmount),
+                "The `transfer` function must not fail."
+            );
+            require(
+                _transaction.token.transfer(_transaction.sender, splitAmount),
+                "The `transfer` function must not fail."
+            );
+        }
+
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.RulingEnforced);
     }
@@ -1045,6 +1133,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.amount,
                     _transaction.settlementSender,
                     _transaction.settlementReceiver,
+                    _transaction.token,
                     _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
@@ -1075,6 +1164,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
                     _transaction.amount,
                     _transaction.settlementSender,
                     _transaction.settlementReceiver,
+                    _transaction.token,
                     _transaction.deadline,
                     _transaction.disputeID,
                     _transaction.senderFee,
