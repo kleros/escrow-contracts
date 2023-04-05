@@ -22,9 +22,7 @@
     "build"
   ],
   "scripts": {
-    "build": "run-s -s build:4 build:7",
-    "build:7": "buidler compile",
-    "build:4": "buidler compile --config buidler.config.4.js",
+    "build": "buidler compile",
     "clean": "buidler clean",
     "lint": "prettier --write '**/*.*(sol|js|json|md)'",
     "lint:check": "prettier --check '**/*.*(sol|js|json|md)'",
@@ -47,9 +45,7 @@
     }
   },
   "devDependencies": {
-    "@kleros/erc-792": "^7.0.0",
-    "@kleros/ethereum-libraries": "^7.0.0",
-    "@kleros/kleros-interaction": "^0.10.0",
+    "@kleros/erc-792": "^8.0.0",
     "@nomiclabs/buidler": "^1.4.7",
     "@nomiclabs/buidler-ethers": "^2.0.0",
     "@nomiclabs/buidler-waffle": "^2.1.0",
@@ -72,6 +68,9 @@
   },
   "dependencies": {
     "@kleros/kleros": "^0.1.2",
-    "@openzeppelin/contracts": "^3.2.1-solc-0.7"
+    "@openzeppelin/contracts": "^4.8.2"
+  },
+  "volta": {
+    "node": "12.22.12"
   }
 }

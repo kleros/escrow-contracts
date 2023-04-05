@@ -1,21 +1,20 @@
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
- *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu, @fnanni-0*]
+ *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
  *  @auditors: []
  *  @bounties: []
  */
 
-pragma solidity ~0.7.6;
+pragma solidity ^0.8;
 pragma experimental ABIEncoderV2;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
-import "@kleros/ethereum-libraries/contracts/CappedMath.sol";
+import "./libraries/CappedMath.sol";
 
 contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     using CappedMath for uint256;
-
     // **************************** //
     // *    Contract variables    * //
     // **************************** //
@@ -239,7 +238,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         string calldata _metaEvidence
     ) external payable returns (uint256 transactionID) {
         Transaction memory transaction;
-        transaction.sender = msg.sender;
+        transaction.sender = payable(msg.sender);
         transaction.receiver = _receiver;
         transaction.amount = msg.value;
         transaction.deadline = block.timestamp.addCap(_timeoutPayment);
@@ -694,7 +693,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         emit AppealContribution(_transactionID, _side, msg.sender, contribution);
 
         // Reimburse leftover ETH if any.
-        if (remainingETH > 0) msg.sender.send(remainingETH); // It is the user responsibility to accept ETH.
+        if (remainingETH > 0) payable(msg.sender).send(remainingETH); // It is the user responsibility to accept ETH.
 
         if (round.paidFees[uint256(_side)] >= totalCost) {
             if (round.sideFunded == Party.None) {

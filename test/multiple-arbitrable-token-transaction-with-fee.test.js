@@ -12,7 +12,7 @@ use(solidity);
 
 const { BigNumber } = ethers;
 
-describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
+describe("MultipleArbitrableTokenTransactionWitFee contract", async () => {
   const arbitrationFee = 20;
   const arbitratorExtraData = "0x85";
   const appealTimeout = 100;
@@ -23,6 +23,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
   const sharedMultiplier = 5000;
   const winnerMultiplier = 2000;
   const loserMultiplier = 8000;
+  const feeShare = 500; // 5%
   const metaEvidenceUri = "https://kleros.io";
 
   let arbitrator;
@@ -41,9 +42,10 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
   let token;
 
   beforeEach("Setup contracts", async () => {
-    [_governor, sender, receiver, other, crowdfunder1, crowdfunder2] = await ethers.getSigners();
+    [_governor, sender, receiver, other, crowdfunder1, crowdfunder2, feeBeneficiary] = await ethers.getSigners();
     senderAddress = await sender.getAddress();
     receiverAddress = await receiver.getAddress();
+    feeBeneficiaryAddress = await feeBeneficiary.getAddress();
 
     const arbitratorArtifact = await readArtifact(
       "./artifacts",
@@ -70,7 +72,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
 
     const contractArtifact = await readArtifact(
       "./artifacts",
-      "MultipleArbitrableTokenTransactionWithAppeals",
+      "MultipleArbitrableTokenTransactionWitFee",
     );
     const MultipleArbitrableTransaction = await ethers.getContractFactory(
       contractArtifact.abi,
@@ -79,6 +81,8 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
     contract = await MultipleArbitrableTransaction.deploy(
       arbitrator.address,
       arbitratorExtraData,
+      feeBeneficiaryAddress,
+      feeShare,
       feeTimeout,
       settlementTimeout,
       sharedMultiplier,
@@ -116,6 +120,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(await contract.loserStakeMultiplier()).to.equal(
         loserMultiplier,
         "Loser multiplier not properly set",
+      );
+      expect(await contract.feeRecipientBasisPoint()).to.equal(
+        feeShare,
+        "feeRecipientBasisPoint not properly set",
+      );
+      expect(await contract.feeRecipient()).to.equal(
+        feeBeneficiaryAddress,
+        "feeRecipient address not properly set",
       );
     });
   });
@@ -304,10 +316,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
         tokensAfter.sender,
         "Sender was not paid correctly",
       );
-      expect(tokensBefore.receiver + (amount / 2 + 1)).to.equal(
+      expect(tokensBefore.receiver + (amount / 2 + 1) - 25).to.equal( // 501 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 25).to.equal( // 501 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
+    );
 
       const [rTransactionId, rTransaction] = getEmittedEvent(
         "TransactionStateUpdated",
@@ -350,9 +366,13 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
         tokensAfter.sender,
         "Sender was not paid correctly",
       );
-      expect(tokensBefore.receiver + (amount / 2 + 1)).to.equal(
+      expect(tokensBefore.receiver + (amount / 2 + 1) - 25).to.equal( // 501 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
+      );
+      expect(tokensBefore.feeBeneficiary + 25).to.equal(
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
       );
 
       const [sTransactionId, sTransaction] = getEmittedEvent(
@@ -525,10 +545,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       ).args;
       const tokensAfter = await getTokenBalances();
 
-      expect(tokensBefore.receiver + payAmount).to.equal(
+      expect(tokensBefore.receiver + payAmount - 50).to.equal( // 1000 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 50).to.equal( // 1000 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
+    );
       expect(tokensBefore.sender).to.equal(tokensAfter.sender, `"Sender balance shouldn't change"`);
       expect(tokensBefore.contract - payAmount).to.equal(
         tokensAfter.contract,
@@ -569,7 +593,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       expect(payTransaction.receiverFee).to.equal(0, "Invalid receieverFee");
 
       expect(pTransactionId).to.equal(transactionId, "Invalid transaction ID on Payment event");
-      expect(amountPaid).to.equal(amount, "Invalid amount reimbursed on Payment event");
+      expect(amountPaid).to.equal(amount - 50, "Invalid amount reimbursed on Payment event"); // 1000 * 0.05
       expect(payCaller).to.equal(senderAddress, "Invalid caller address on Payment event");
     });
 
@@ -619,10 +643,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       ).args;
       const tokensAfter = await getTokenBalances();
 
-      expect(tokensBefore.receiver + amount).to.equal(
+      expect(tokensBefore.receiver + amount - 50).to.equal( // 1000 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 50).to.equal(
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
+    );
       expect(tokensBefore.sender).to.equal(tokensAfter.sender, `"Sender balance shouldn't change"`);
       expect(tokensBefore.contract - amount).to.equal(
         tokensAfter.contract,
@@ -766,9 +794,13 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       const tokensAfter = await getTokenBalances();
       const balancesAfter = await getBalances();
 
-      expect(tokensBefore.receiver + amount).to.equal(
+      expect(tokensBefore.receiver + amount - 50).to.equal( // 1000 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
+      );
+      expect(tokensBefore.feeBeneficiary + 50).to.equal(
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
       );
       expect(tokensBefore.sender).to.equal(tokensAfter.sender, `"Sender balance shouldn't change"`);
       expect(tokensBefore.contract - amount).to.equal(
@@ -806,9 +838,13 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       const tokensAfter = await getTokenBalances();
       const balancesAfter = await getBalances();
 
-      expect(tokensBefore.receiver + amount / 2).to.equal(
+      expect(tokensBefore.receiver + amount / 2 - 25).to.equal(
         tokensAfter.receiver,
         "Receiver was not paid correctly",
+      );
+      expect(tokensBefore.feeBeneficiary + 25).to.equal( // 500 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
       );
       expect(tokensBefore.sender + amount / 2).to.equal(
         tokensAfter.sender,
@@ -1236,10 +1272,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
         tokensAfter.sender,
         "Sender was not rewarded the settlement correctly",
       );
-      expect(tokensBefore.receiver + senderSettle).to.equal(
+      expect(tokensBefore.receiver + senderSettle - 30).to.equal( // 600 * 0.05
         tokensAfter.receiver,
         "Receiver was not rewarded the settlement correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 30).to.equal( // 600 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not rewarded the settlement correctly",
+    );
 
       expect(balancesBefore.sender.add(BigNumber.from(arbitrationFee))).to.equal(
         balancesAfter.sender,
@@ -1294,10 +1334,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
         tokensAfter.sender,
         "Sender was not rewarded the settlement correctly",
       );
-      expect(tokensBefore.receiver + receiverSettle).to.equal(
+      expect(tokensBefore.receiver + receiverSettle - 40).to.equal( // 800 * 0.05
         tokensAfter.receiver,
         "Receiver was not rewarded the settlement correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 40).to.equal( // 800 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not rewarded the settlement correctly",
+    );
 
       expect(balancesBefore.receiver.add(BigNumber.from(arbitrationFee))).to.equal(
         balancesAfter.receiver,
@@ -1425,9 +1469,13 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       const balancesAfter = await getBalances();
       const tokensAfter = await getTokenBalances();
 
-      expect(tokensBefore.receiver + amount).to.equal(
+      expect(tokensBefore.receiver + amount - 50).to.equal( // 1000 * 0.05
         tokensAfter.receiver,
         "Receiver was not rewarded correctly",
+      );
+      expect(tokensBefore.feeBeneficiary + 50).to.equal(
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not rewarded correctly",
       );
       expect(tokensBefore.sender).to.equal(tokensAfter.sender, "sender must not be rewarded");
 
@@ -1521,10 +1569,14 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       const tokensAfter = await getTokenBalances();
       const balancesAfter = await getBalances();
 
-      expect(tokensBefore.receiver + amount2).to.equal(
+      expect(tokensBefore.receiver + amount2 - 75).to.equal( // 1500 * 0.05
         tokensAfter.receiver,
         "Receiver was not paid correctly",
       );
+      expect(tokensBefore.feeBeneficiary + 75).to.equal( // 1500 * 0.05
+        tokensAfter.feeBeneficiary,
+        "feeBeneficiary was not paid correctly",
+    );
       expect(tokensBefore.sender + amount).to.equal(
         tokensAfter.sender,
         "Sender was not reimbursed correctly",
@@ -2515,6 +2567,7 @@ describe("MultipleArbitrableTokenTransactionWithAppeals contract", async () => {
       sender: (await token.balanceOf(senderAddress)).toNumber(),
       receiver: (await token.balanceOf(receiverAddress)).toNumber(),
       contract: (await token.balanceOf(contract.address)).toNumber(),
+      feeBeneficiary: (await token.balanceOf(feeBeneficiaryAddress)).toNumber(),
     };
     return tokenBalances;
   }
