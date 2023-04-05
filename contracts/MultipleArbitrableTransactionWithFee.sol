@@ -1,6 +1,6 @@
 /**
- *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
- *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
+ *  @authors: [@unknownunknown1, @fnanni-0, @shalzz, @remedcu]
+ *  @reviewers: []
  *  @auditors: []
  *  @bounties: []
  */
@@ -13,7 +13,13 @@ import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 import "./libraries/CappedMath.sol";
 
-contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
+/**
+ *  @title MultipleArbitrableTransactionWithFee
+ *  @dev Escrow contract that demands platform fees. Also supports appeals.
+ *  A fee is associated with each successful payment to receiver.
+ */
+
+contract MultipleArbitrableTransactionWithFee is IArbitrable, IEvidence {
     using CappedMath for uint256;
     // **************************** //
     // *    Contract variables    * //
@@ -54,8 +60,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         uint256 settlementReceiver; // Settlement amount proposed by the receiver
         uint256 deadline; // Timestamp at which the transaction can be automatically executed if not disputed.
         uint256 disputeID; // If dispute exists, the ID of the dispute.
-        uint256 senderFee; // Total fees paid by the sender.
-        uint256 receiverFee; // Total fees paid by the receiver.
+        uint256 senderFee; // Total arbitration fees paid by the sender.
+        uint256 receiverFee; // Total arbitration fees paid by the receiver.
         uint256 lastInteraction; // Last interaction for the dispute procedure.
         Status status;
     }
@@ -99,6 +105,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     // Multiplier for calculating the appeal fee of the party that lost the previous round.
     uint256 public immutable loserStakeMultiplier;
 
+    address public feeRecipient; // Address which receives a share of receiver payment.
+    uint256 public feeRecipientBasisPoint; // The share of fee to be received by the feeRecipient, in basis points.
+
     /// @dev Stores the hashes of all transactions.
     bytes32[] public transactionHashes;
 
@@ -125,6 +134,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
      *  @param _party The party that paid.
      */
     event Payment(uint256 indexed _transactionID, uint256 _amount, address _party);
+
+    /** @dev To be emitted when a fee is received by the feeRecipient.
+     *  @param _transactionID The index of the transaction.
+     *  @param _amount The amount paid.
+     */
+    event FeeRecipientPayment(uint256 indexed _transactionID, uint256 _amount);
+
+    /** @dev To be emitted when a feeRecipient is changed.
+     *  @param _oldFeeRecipient Previous feeRecipient.
+     *  @param _newFeeRecipient Current feeRecipient.
+     */
+    event FeeRecipientChanged(address indexed _oldFeeRecipient, address indexed _newFeeRecipient);
 
     /** @dev Indicate that a party has to pay a fee or would otherwise be considered as losing.
      *  @param _transactionID The index of the transaction.
@@ -180,6 +201,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     /** @dev Constructor.
      *  @param _arbitrator The arbitrator of the contract.
      *  @param _arbitratorExtraData Extra data for the arbitrator.
+     *  @param _feeRecipient Address which receives a share of receiver payment.
+     *  @param _feeRecipientBasisPoint The share of fee to be received by the feeRecipient.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
      *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
@@ -193,6 +216,8 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     constructor(
         IArbitrator _arbitrator,
         bytes memory _arbitratorExtraData,
+        address _feeRecipient,
+        uint256 _feeRecipientBasisPoint,
         uint256 _feeTimeout,
         uint256 _settlementTimeout,
         uint256 _sharedStakeMultiplier,
@@ -201,6 +226,9 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     ) {
         arbitrator = _arbitrator;
         arbitratorExtraData = _arbitratorExtraData;
+        feeRecipient = _feeRecipient;
+        // Basis point being set higher than 10000 will result in underflow, but it's the responsibility of the deployer of the contract.
+        feeRecipientBasisPoint = _feeRecipientBasisPoint;
         feeTimeout = _feeTimeout;
         settlementTimeout = _settlementTimeout;
         sharedStakeMultiplier = _sharedStakeMultiplier;
@@ -224,6 +252,16 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             "Transaction doesn't match stored hash."
         );
         _;
+    }
+
+    /** @dev Change Fee Recipient.
+     *  @param _newFeeRecipient Address of the new Fee Recipient.
+     */
+    function changeFeeRecipient(address _newFeeRecipient) external {
+        require(msg.sender == feeRecipient, "The caller must be the current Fee Recipient");
+        feeRecipient = _newFeeRecipient;
+
+        emit FeeRecipientChanged(msg.sender, _newFeeRecipient);
     }
 
     /** @dev Create a transaction.
@@ -267,11 +305,15 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
         require(_amount <= _transaction.amount, "Maximum amount available for payment exceeded.");
 
-        _transaction.receiver.send(_amount); // It is the user responsibility to accept ETH.
         _transaction.amount -= _amount;
 
+        uint256 feeAmount = calculateFeeRecipientAmount(_amount);
+        payable(feeRecipient).send(feeAmount);
+        _transaction.receiver.send(_amount - feeAmount); // It is the user responsibility to accept ETH.
+
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
-        emit Payment(_transactionID, _amount, msg.sender);
+        emit Payment(_transactionID, _amount - feeAmount, msg.sender);
+        emit FeeRecipientPayment(_transactionID, feeAmount);
         emit TransactionStateUpdated(_transactionID, _transaction);
     }
 
@@ -311,12 +353,18 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         require(block.timestamp >= _transaction.deadline, "Deadline not passed.");
         require(_transaction.status == Status.NoDispute, "The transaction must not be disputed.");
 
-        _transaction.receiver.send(_transaction.amount); // It is the user responsibility to accept ETH.
+        uint256 amount = _transaction.amount;
         _transaction.amount = 0;
+
+        uint256 feeAmount = calculateFeeRecipientAmount(amount);
+        payable(feeRecipient).send(feeAmount);
+        _transaction.receiver.send(amount - feeAmount); // It is the user responsibility to accept ETH.
 
         _transaction.status = Status.Resolved;
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        emit Payment(_transactionID, amount - feeAmount, _transaction.sender);
+        emit FeeRecipientPayment(_transactionID, feeAmount);
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TransactionExecuted);
     }
@@ -397,9 +445,14 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         // It is the users responsibility to accept ETH.
         _transaction.sender.send(remainingAmount);
-        _transaction.receiver.send(settlementAmount);
+
+        uint256 feeAmount = calculateFeeRecipientAmount(settlementAmount);
+        payable(feeRecipient).send(feeAmount);
+        _transaction.receiver.send(settlementAmount - feeAmount);
 
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
+        emit Payment(_transactionID, settlementAmount - feeAmount, _transaction.sender);
+        emit FeeRecipientPayment(_transactionID, feeAmount);
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.SettlementReached);
     }
@@ -772,6 +825,13 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         contributionTo[uint256(Party.Receiver)] = 0;
     }
 
+    /** @dev Calculate the amount to be paid in wei according to feeRecipientBasisPoint for a particular amount.
+     *  @param _amount Amount to pay in wei.
+     */
+    function calculateFeeRecipientAmount(uint256 _amount) internal view returns(uint256 feeAmount){
+        feeAmount = (_amount * feeRecipientBasisPoint) / 10000;
+    }
+
     /** @dev Withdraws contributions of appeal rounds. Reimburses contributions
      *  if the appeal was not fully funded.
      *  If the appeal was fully funded, sends the fee stake rewards and
@@ -876,16 +936,20 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
         ];
         require(transactionDispute.hasRuling, "Arbitrator has not ruled yet.");
 
+        uint256 feeAmount;
         // Give the arbitration fee back.
         // Note that we use send to prevent a party from blocking the execution.
         if (transactionDispute.ruling == Party.Sender) {
             // If there was a settlement amount proposed
             // we use that to make the partial payment and refund the rest
             if (_transaction.settlementSender != 0) {
+                feeAmount = calculateFeeRecipientAmount(_transaction.settlementSender);
                 _transaction.sender.send(
                     _transaction.senderFee + _transaction.amount - _transaction.settlementSender
                 );
-                _transaction.receiver.send(_transaction.settlementSender);
+                payable(feeRecipient).send(feeAmount);
+                _transaction.receiver.send(_transaction.settlementSender - feeAmount);
+                emit FeeRecipientPayment(_transactionID, feeAmount);
             } else {
                 _transaction.sender.send(_transaction.senderFee + _transaction.amount);
             }
@@ -893,17 +957,27 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
             // If there was a settlement amount proposed
             // we use that to make the partial payment and refund the rest to sender
             if (_transaction.settlementReceiver != 0) {
+                feeAmount = calculateFeeRecipientAmount(_transaction.settlementReceiver);
+                payable(feeRecipient).send(feeAmount);
                 _transaction.sender.send(_transaction.amount - _transaction.settlementReceiver);
                 _transaction.receiver.send(
-                    _transaction.receiverFee + _transaction.settlementReceiver
+                    _transaction.receiverFee + _transaction.settlementReceiver - feeAmount
                 );
+                emit FeeRecipientPayment(_transactionID, feeAmount);
             } else {
-                _transaction.receiver.send(_transaction.receiverFee + _transaction.amount);
+                feeAmount = calculateFeeRecipientAmount(_transaction.amount);
+                payable(feeRecipient).send(feeAmount);
+                _transaction.receiver.send(_transaction.receiverFee + _transaction.amount - feeAmount);
+                emit FeeRecipientPayment(_transactionID, feeAmount);
             }
         } else {
-            uint256 splitAmount = (_transaction.senderFee + _transaction.amount) / 2;
-            _transaction.sender.send(splitAmount);
-            _transaction.receiver.send(splitAmount);
+            uint256 splitArbitration = _transaction.senderFee / 2;
+            uint256 splitAmount = _transaction.amount / 2;
+            feeAmount = calculateFeeRecipientAmount(splitAmount);
+            _transaction.sender.send(splitArbitration + splitAmount);
+            payable(feeRecipient).send(feeAmount);
+            _transaction.receiver.send(splitArbitration + splitAmount - feeAmount);
+            emit FeeRecipientPayment(_transactionID, feeAmount);
         }
 
         _transaction.amount = 0;
