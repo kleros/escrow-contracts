@@ -70,14 +70,11 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
     }
 
     struct Round {
-        uint256[3] paidFees; // Tracks the fees paid by each side in this round.
-        // If the round is appealed, i.e. this is not the last round,
-        // Party.None means that both sides have paid.
-        Party sideFunded;
-        // Sum of reimbursable fees and stake rewards available to the parties
-        // that made contributions to the side that ultimately wins a dispute.
-        uint256 feeRewards;
-        mapping(address => uint256[3]) contributions; // Maps contributors to their contributions for each side.
+        uint256[3] paidFees; // Tracks the fees paid in this round in the form paidFees[side].
+        bool[3] hasPaid; // True if the fees for this particular side have been fully paid in the form hasPaid[side].
+        mapping(address => uint256[3]) contributions; // Maps contributors to their contributions for each side in the form contributions[address][side].
+        uint256 feeRewards; // Sum of reimbursable appeal fees available to the parties that made contributions to the side that ultimately wins a dispute.
+        uint256[] fundedSides; // Stores the sides that are fully funded.
     }
 
     /**
@@ -87,6 +84,11 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         uint256 transactionID; // The transaction ID.
         bool hasRuling; // Required to differentiate between having no ruling and a RefusedToRule ruling.
         Party ruling; // The ruling given by the arbitrator.
+    }
+
+    struct FeeRecipientData {
+	    address feeRecipient; // Address which receives a share of receiver payment.
+        uint16 feeRecipientBasisPoint; // The share of fee to be received by the feeRecipient, in basis points. Note that this value shouldn't exceed Divisor.
     }
 
     IArbitrator public immutable arbitrator; // Address of the arbitrator contract. TRUSTED.
@@ -108,11 +110,13 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
     // Multiplier for calculating the appeal fee of the party that lost the previous round.
     uint256 public immutable loserStakeMultiplier;
 
-    address public feeRecipient; // Address which receives a share of receiver payment.
-    uint256 public feeRecipientBasisPoint; // The share of fee to be received by the feeRecipient, in basis points.
+    FeeRecipientData public feeRecipientData;
 
     /// @dev Stores the hashes of all transactions.
     bytes32[] public transactionHashes;
+    
+    /// @dev Tokens that were whitelisted by deployer and feeRecipient.
+    mapping(IERC20 => bool) public whitelisted;
 
     /// @dev Maps a transactionID to its respective appeal rounds.
     mapping(uint256 => Round[]) public roundsByTransactionID;
@@ -150,6 +154,18 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _newFeeRecipient Current feeRecipient.
      */
     event FeeRecipientChanged(address indexed _oldFeeRecipient, address indexed _newFeeRecipient);
+
+    /** @dev To be emitted when feeRecipientBasisPoint is changed.
+     *  @param _oldFeeRecipientBasisPoint Previous value of feeRecipientBasisPoint.
+     *  @param _newFeeRecipientBasisPoint Current value of feeRecipientBasisPoint.
+     */
+    event FeeBasisPointChanged(uint16 _oldFeeRecipientBasisPoint, uint16 _newFeeRecipientBasisPoint);
+
+    /** @dev To be emitted when the whitelist was changed.
+     *  @param _token The token that was either added or removed from whitelist.
+     *  @param _allow Whether added or removed.
+     */
+    event WhitelistChanged(IERC20 _token, bool _allow);
 
     /** @dev Indicate that a party has to pay a fee or would otherwise be considered as losing.
      *  @param _transactionID The index of the transaction.
@@ -209,6 +225,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeRecipient Address which receives a share of receiver payment.
      *  @param _feeRecipientBasisPoint The share of fee to be received by the feeRecipient.
+     *  @param _whitelistedTokens Array of the default whitelisted tokens.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
      *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
@@ -223,7 +240,8 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         IArbitrator _arbitrator,
         bytes memory _arbitratorExtraData,
         address _feeRecipient,
-        uint256 _feeRecipientBasisPoint,
+        uint16 _feeRecipientBasisPoint,
+        IERC20[] memory _whitelistedTokens,
         uint256 _feeTimeout,
         uint256 _settlementTimeout,
         uint256 _sharedStakeMultiplier,
@@ -232,15 +250,22 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
     ) {
         arbitrator = _arbitrator;
         arbitratorExtraData = _arbitratorExtraData;
-        feeRecipient = _feeRecipient;
+        feeRecipientData.feeRecipient = _feeRecipient;
         // Basis point being set higher than 10000 will result in underflow, 
         // but it's the responsibility of the deployer of the contract.
-        feeRecipientBasisPoint = _feeRecipientBasisPoint;
+        feeRecipientData.feeRecipientBasisPoint = _feeRecipientBasisPoint;
         feeTimeout = _feeTimeout;
         settlementTimeout = _settlementTimeout;
         sharedStakeMultiplier = _sharedStakeMultiplier;
         winnerStakeMultiplier = _winnerStakeMultiplier;
         loserStakeMultiplier = _loserStakeMultiplier;
+
+        IERC20 token;
+        for (uint256 i = 0; i < _whitelistedTokens.length; i++) {
+            token = _whitelistedTokens[i];
+            whitelisted[token] = true;
+            emit WhitelistChanged(token, true);
+        }
     }
 
     modifier onlyValidTransaction(uint256 _transactionID, Transaction memory _transaction) {
@@ -260,6 +285,42 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         );
         _;
     }
+    
+    /** @dev Change Fee Recipient.
+     *  @param _newFeeRecipient Address of the new Fee Recipient.
+     */
+    function changeFeeRecipient(address _newFeeRecipient) external {
+        require(msg.sender == feeRecipientData.feeRecipient, "The caller must be the current Fee Recipient");
+        feeRecipientData.feeRecipient = _newFeeRecipient;
+
+        emit FeeRecipientChanged(msg.sender, _newFeeRecipient);
+    }
+
+    /** @dev Change feeRecipientBasisPoint.
+     *  @param _newFeeRecipientBasisPoint Value of the new feeRecipientBasisPoint.
+     */
+    function changeFeeRecipientBasisPoint(uint16 _newFeeRecipientBasisPoint) external {
+        require(msg.sender == feeRecipientData.feeRecipient, "The caller must be the current Fee Recipient");
+
+        emit FeeBasisPointChanged(feeRecipientData.feeRecipientBasisPoint, _newFeeRecipientBasisPoint);
+        feeRecipientData.feeRecipientBasisPoint = _newFeeRecipientBasisPoint;      
+    }
+
+    /** @dev Add/remove tokens from whitelist.
+     *  @param _tokens Array of tokens.
+     *  @param _allow Whether to add or remove from whitelist.
+     */
+    function changeWhitelist(IERC20[] memory _tokens, bool _allow) external {
+        require(msg.sender == feeRecipientData.feeRecipient, "The caller must be the current Fee Recipient");
+        IERC20 token;
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            token = _tokens[i];
+            if (whitelisted[token] != _allow) {
+                whitelisted[token] = _allow;
+                emit WhitelistChanged(token, _allow);
+            }
+        }
+    }
 
     /** @dev Create a transaction. UNTRUSTED.
      *  @param _amount The amount of tokens in this transaction.
@@ -276,10 +337,15 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         address payable _receiver,
         string calldata _metaEvidence
     ) external returns (uint256 transactionID) {
+        require(whitelisted[_token], "Token is not whitelisted");
         // Transfers token from sender wallet to contract.
         require(
             _token.transferFrom(msg.sender, address(this), _amount),
             "Sender does not have enough approved funds."
+        );
+        require(
+            _amount.mulCap(feeRecipientData.feeRecipientBasisPoint) >= MULTIPLIER_DIVISOR, 
+            "Amount too low to pay fee."
         );
 
         Transaction memory transaction;
@@ -297,16 +363,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         emit TransactionCreated(transactionID, msg.sender, _receiver, _token, _amount);
         emit TransactionStateUpdated(transactionID, transaction);
         emit MetaEvidence(transactionID, _metaEvidence);
-    }
-
-    /** @dev Change Fee Recipient.
-     *  @param _newFeeRecipient Address of the new Fee Recipient.
-     */
-    function changeFeeRecipient(address _newFeeRecipient) public {
-        require(msg.sender == feeRecipient, "The caller must be the current Fee Recipient");
-        feeRecipient = _newFeeRecipient;
-
-        emit FeeRecipientChanged(msg.sender, _newFeeRecipient);
     }
 
     /** @notice Pay receiver. To be called if the good or service is provided.
@@ -330,7 +386,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
 
         uint256 feeAmount = calculateFeeRecipientAmount(_amount);
         // Tokens should not reenter or allow recipients to refuse the transfer.
-        _transaction.token.transfer(feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
 
         require(
             _transaction.token.transfer(_transaction.receiver, _amount - feeAmount),
@@ -388,7 +444,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
         uint256 feeAmount = calculateFeeRecipientAmount(amount);
-        _transaction.token.transfer(feeRecipient, feeAmount);
+        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
 
         require(
             _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
@@ -477,7 +533,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
 
         uint256 feeAmount = calculateFeeRecipientAmount(settlementAmount);
-        _transaction.token.transfer(feeRecipient, feeAmount);
+        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
 
         require(
             _transaction.token.transfer(_transaction.sender, remainingAmount),
@@ -669,12 +725,15 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         _transaction.status = Status.Resolved;
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
 
+        uint256 feeAmount = calculateFeeRecipientAmount(amount);
+        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
         require(
-            _transaction.token.transfer(_transaction.receiver, amount),
+            _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
             "The `transfer` function must not fail."
         );
         _transaction.receiver.send(receiverFee); // It is the user responsibility to accept ETH.
 
+        emit FeeRecipientPaymentInToken(_transactionID, feeAmount, _transaction.token);
         emit TransactionStateUpdated(_transactionID, _transaction);
         emit TransactionResolved(_transactionID, Resolution.TimeoutByReceiver);
     }
@@ -749,7 +808,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         Transaction calldata _transaction,
         Party _side
     ) external payable onlyValidTransactionCD(_transactionID, _transaction) {
-        require(_side != Party.None, "Wrong party.");
         require(_transaction.status == Status.DisputeCreated, "No dispute to appeal");
 
         (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(
@@ -777,7 +835,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         Round storage round = roundsByTransactionID[_transactionID][
             roundsByTransactionID[_transactionID].length - 1
         ];
-        require(_side != round.sideFunded, "Appeal fee has already been paid.");
+        require(!round.hasPaid[uint256(_side)], "Appeal fee is already paid.");
 
         uint256 appealCost = arbitrator.appealCost(_transaction.disputeID, arbitratorExtraData);
         uint256 totalCost = appealCost.addCap((appealCost.mulCap(multiplier)) / MULTIPLIER_DIVISOR);
@@ -794,23 +852,23 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
 
         emit AppealContribution(_transactionID, _side, msg.sender, contribution);
 
+        if (round.paidFees[uint256(_side)] >= totalCost) {
+            round.feeRewards += round.paidFees[uint256(_side)];
+            round.fundedSides.push(uint256(_side));
+            round.hasPaid[uint256(_side)] = true;
+            emit HasPaidAppealFee(_transactionID, _side);
+        }
+
+        if (round.fundedSides.length > 1) {
+            // At least two sides are fully funded.
+            roundsByTransactionID[_transactionID].push();
+            round.feeRewards = round.feeRewards.subCap(appealCost);
+            arbitrator.appeal{ value: appealCost }(_transaction.disputeID, arbitratorExtraData);
+        }
+
         // Reimburse leftover ETH if any.
         // Deliberate use of send in order to not block the contract in case of reverting fallback.
         if (remainingETH > 0) payable(msg.sender).send(remainingETH);
-
-        if (round.paidFees[uint256(_side)] >= totalCost) {
-            if (round.sideFunded == Party.None) {
-                round.sideFunded = _side;
-            } else {
-                // Both sides are fully funded. Create an appeal.
-                arbitrator.appeal{ value: appealCost }(_transaction.disputeID, arbitratorExtraData);
-                round.feeRewards = (round.paidFees[uint256(Party.Sender)] +
-                    round.paidFees[uint256(Party.Receiver)]).subCap(appealCost);
-                roundsByTransactionID[_transactionID].push();
-                round.sideFunded = Party.None;
-            }
-            emit HasPaidAppealFee(_transactionID, _side);
-        }
     }
 
     /** @dev Returns the contribution value and remainder from available ETH and required amount.
@@ -839,47 +897,44 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _transactionID The ID of the associated transaction.
      *  @param _round The round from which to withdraw.
      *  @param _finalRuling The final ruling of this transaction.
+     *  @param _side Side from which to withdraw.
      *  @return reward The amount of wei available to withdraw from _round.
      */
     function _withdrawFeesAndRewards(
         address _beneficiary,
         uint256 _transactionID,
         uint256 _round,
-        uint256 _finalRuling
+        uint256 _finalRuling,
+        uint256 _side
     ) internal returns (uint256 reward) {
         Round storage round = roundsByTransactionID[_transactionID][_round];
-        uint256[3] storage contributionTo = round.contributions[_beneficiary];
-        uint256 lastRound = roundsByTransactionID[_transactionID].length - 1;
 
-        if (_round == lastRound) {
-            // Allow to reimburse if funding was unsuccessful.
-            reward =
-                contributionTo[uint256(Party.Sender)] +
-                contributionTo[uint256(Party.Receiver)];
-        } else if (_finalRuling == uint256(Party.None)) {
-            // Reimburse unspent fees proportionally if there is no winner and loser.
-            uint256 totalFeesPaid = round.paidFees[uint256(Party.Sender)] +
-                round.paidFees[uint256(Party.Receiver)];
-            uint256 totalBeneficiaryContributions = contributionTo[uint256(Party.Sender)] +
-                contributionTo[uint256(Party.Receiver)];
-            reward = totalFeesPaid > 0
-                ? (totalBeneficiaryContributions * round.feeRewards) / totalFeesPaid
+        // Allow to reimburse if funding of the round was unsuccessful.
+        if (!round.hasPaid[_side]) {
+            reward = round.contributions[_beneficiary][_side];
+        } else if (!round.hasPaid[_finalRuling]) {
+            // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+            // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
+            reward = round.fundedSides.length > 1
+                ? (round.contributions[_beneficiary][_side] * round.feeRewards) /
+                    (round.paidFees[round.fundedSides[0]] + round.paidFees[round.fundedSides[1]])
                 : 0;
-        } else {
+        } else if (_finalRuling == _side) {
+            uint256 paidFees = round.paidFees[_side];
             // Reward the winner.
-            reward = round.paidFees[_finalRuling] > 0
-                ? (contributionTo[_finalRuling] * round.feeRewards) / round.paidFees[_finalRuling]
-                : 0;
+            reward = paidFees > 0 ? (round.contributions[_beneficiary][_side] * round.feeRewards) / paidFees : 0;
         }
-        contributionTo[uint256(Party.Sender)] = 0;
-        contributionTo[uint256(Party.Receiver)] = 0;
+
+        if (reward != 0) {
+            round.contributions[_beneficiary][_side] = 0;
+        }
     }
 
     /** @dev Calculate the amount to be paid according to feeRecipientBasisPoint for a particular amount.
      *  @param _amount Amount to pay.
      */
     function calculateFeeRecipientAmount(uint256 _amount) internal view returns(uint256 feeAmount){
-        feeAmount = (_amount * feeRecipientBasisPoint) / 10000;
+        feeAmount = (_amount.mulCap(feeRecipientData.feeRecipientBasisPoint)) / MULTIPLIER_DIVISOR;
     }
 
     /** @dev Withdraws contributions of appeal rounds. Reimburses contributions
@@ -890,12 +945,14 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _transactionID The ID of the associated transaction.
      *  @param _transaction The transaction state.
      *  @param _round The round from which to withdraw.
+     *  @param _side Side from which to withdraw.
      */
     function withdrawFeesAndRewards(
         address payable _beneficiary,
         uint256 _transactionID,
         Transaction calldata _transaction,
-        uint256 _round
+        uint256 _round,
+        Party _side
     ) external onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
@@ -907,7 +964,8 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             _beneficiary,
             _transactionID,
             _round,
-            uint256(transactionDispute.ruling)
+            uint256(transactionDispute.ruling),
+            uint256(_side)
         );
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
@@ -922,13 +980,15 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _cursor The round from where to start withdrawing.
      *  @param _count The number of rounds to iterate. If set to 0 or a value
      *  larger than the number of rounds, iterates until the last round.
+     *  @param _side Side to withdraw from.
      */
     function batchRoundWithdraw(
         address payable _beneficiary,
         uint256 _transactionID,
         Transaction calldata _transaction,
         uint256 _cursor,
-        uint256 _count
+        uint256 _count,
+        Party _side
     ) external onlyValidTransactionCD(_transactionID, _transaction) {
         require(_transaction.status == Status.Resolved, "The transaction must be resolved.");
         TransactionDispute storage transactionDispute = disputeIDtoTransactionDispute[
@@ -940,7 +1000,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         uint256 reward;
         uint256 totalRounds = roundsByTransactionID[_transactionID].length;
         for (uint256 i = _cursor; i < totalRounds && (_count == 0 || i < _cursor + _count); i++)
-            reward += _withdrawFeesAndRewards(_beneficiary, _transactionID, i, finalRuling);
+            reward += _withdrawFeesAndRewards(_beneficiary, _transactionID, i, finalRuling, uint256(_side));
         _beneficiary.send(reward); // It is the user responsibility to accept ETH.
     }
 
@@ -961,14 +1021,14 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
 
         Round[] storage rounds = roundsByTransactionID[transactionDispute.transactionID];
         Round storage round = rounds[rounds.length - 1];
+        uint256 finalRuling = _ruling;
 
         // If only one side paid its fees we assume the ruling to be in its favor.
-        if (round.sideFunded == Party.Sender) transactionDispute.ruling = Party.Sender;
-        else if (round.sideFunded == Party.Receiver) transactionDispute.ruling = Party.Receiver;
-        else transactionDispute.ruling = Party(_ruling);
+        if (round.fundedSides.length == 1) finalRuling = round.fundedSides[0];
 
+        transactionDispute.ruling = Party(finalRuling);
         transactionDispute.hasRuling = true;
-        emit Ruling(arbitrator, _disputeID, uint256(transactionDispute.ruling));
+        emit Ruling(arbitrator, _disputeID, finalRuling);
     }
 
     /** @dev Execute a ruling of a dispute. It reimburses the fee to the winning party.
@@ -1012,7 +1072,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             if (settlementSender != 0) {
                 feeAmount = calculateFeeRecipientAmount(settlementSender);
                 // Tokens should not reenter or allow recipients to refuse the transfer.
-                _transaction.token.transfer(feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
                 require(
                     _transaction.token.transfer(_transaction.sender, amount - settlementSender),
                     "The `transfer` function must not fail."
@@ -1036,7 +1096,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             if (settlementReceiver != 0) {
                 feeAmount = calculateFeeRecipientAmount(settlementReceiver);
                 // Tokens should not reenter or allow recipients to refuse the transfer.
-                _transaction.token.transfer(feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
                 require(
                     _transaction.token.transfer(_transaction.sender, amount - settlementReceiver),
                     "The `transfer` function must not fail."
@@ -1048,7 +1108,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
                 emit FeeRecipientPaymentInToken(_transactionID, feeAmount, _transaction.token);
             } else {
                 feeAmount = calculateFeeRecipientAmount(amount);
-                _transaction.token.transfer(feeRecipient, feeAmount);
+                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
                 require(
                     _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
                     "The `transfer` function must not fail."
@@ -1065,7 +1125,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             uint256 splitAmount = amount / 2;
 
             feeAmount = calculateFeeRecipientAmount(splitAmount);
-            _transaction.token.transfer(feeRecipient, feeAmount);
+            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
             require(
                 _transaction.token.transfer(_transaction.receiver, splitAmount - feeAmount),
                 "The `transfer` function must not fail."
@@ -1092,12 +1152,14 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _transactionID The index of the transaction.
      *  @param _transaction The transaction state.
      *  @param _beneficiary The contributor for which to query.
+     *  @param _side The side to query.
      *  @return total The total amount of wei available to withdraw.
      */
     function amountWithdrawable(
         uint256 _transactionID,
         Transaction calldata _transaction,
-        address _beneficiary
+        address _beneficiary,
+        Party _side
     ) external view onlyValidTransactionCD(_transactionID, _transaction) returns (uint256 total) {
         if (_transaction.status != Status.Resolved) return total;
 
@@ -1112,24 +1174,20 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         uint256 totalRounds = rounds.length;
         for (uint256 i = 0; i < totalRounds; i++) {
             Round storage round = rounds[i];
-            if (i == totalRounds - 1) {
-                total +=
-                    round.contributions[_beneficiary][uint256(Party.Sender)] +
-                    round.contributions[_beneficiary][uint256(Party.Receiver)];
-            } else if (finalRuling == uint256(Party.None)) {
-                uint256 totalFeesPaid = round.paidFees[uint256(Party.Sender)] +
-                    round.paidFees[uint256(Party.Receiver)];
-                uint256 totalBeneficiaryContributions = round.contributions[_beneficiary][
-                    uint256(Party.Sender)
-                ] + round.contributions[_beneficiary][uint256(Party.Receiver)];
-                total += totalFeesPaid > 0
-                    ? (totalBeneficiaryContributions * round.feeRewards) / totalFeesPaid
-                    : 0;
-            } else {
-                total += round.paidFees[finalRuling] > 0
-                    ? (round.contributions[_beneficiary][finalRuling] * round.feeRewards) /
-                        round.paidFees[finalRuling]
-                    : 0;
+
+            if (!round.hasPaid[uint256(_side)]) {
+                total += round.contributions[_beneficiary][uint256(_side)];
+            } else if (!round.hasPaid[finalRuling]) {
+                // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+                // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
+                total += round.fundedSides.length > 1
+                ? (round.contributions[_beneficiary][uint256(_side)] * round.feeRewards) /
+                    (round.paidFees[round.fundedSides[0]] + round.paidFees[round.fundedSides[1]])
+                : 0;
+            } else if (finalRuling == uint256(_side)) {
+                uint256 paidFees = round.paidFees[uint256(_side)];
+                // Reward the winner.
+                total += paidFees > 0 ? (round.contributions[_beneficiary][uint256(_side)] * round.feeRewards) / paidFees : 0;
             }
         }
     }
@@ -1168,8 +1226,9 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _transactionID The ID of the transaction.
      *  @param _round The round to query.
      *  @return paidFees
-     *          sideFunded
+     *          hasPaid
      *          feeRewards
+     *          fundedSides
      *          appealed
      */
     function getRoundInfo(uint256 _transactionID, uint256 _round)
@@ -1177,16 +1236,18 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         view
         returns (
             uint256[3] memory paidFees,
-            Party sideFunded,
+            bool[3] memory hasPaid,
             uint256 feeRewards,
+            uint256[] memory fundedSides,
             bool appealed
         )
     {
         Round storage round = roundsByTransactionID[_transactionID][_round];
         return (
             round.paidFees,
-            round.sideFunded,
+            round.hasPaid,
             round.feeRewards,
+            round.fundedSides,
             _round != roundsByTransactionID[_transactionID].length - 1
         );
     }
