@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz, @remedcu]
  *  @reviewers: []
@@ -5,8 +7,7 @@
  *  @bounties: []
  */
 
-pragma solidity ^0.8;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.9;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
@@ -17,6 +18,8 @@ import "./libraries/CappedMath.sol";
  *  @title MultipleArbitrableTransactionWithFee
  *  @dev Escrow contract that demands platform fees. Also supports appeals.
  *  A fee is associated with each successful payment to receiver.
+ *  Note that send() function is used deliberately instead of transfer() 
+ *  to avoid blocking the flow with reverting fallback.
  */
 
 contract MultipleArbitrableTransactionWithFee is IArbitrable, IEvidence {
@@ -506,7 +509,7 @@ contract MultipleArbitrableTransactionWithFee is IArbitrable, IEvidence {
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
         _transaction.senderFee += msg.value;
-        // Require that the total pay at least the arbitration cost.
+        // Require that the total paid to be at least the arbitration cost.
         require(
             _transaction.senderFee >= arbitrationCost,
             "The sender fee must cover arbitration costs."
@@ -823,7 +826,7 @@ contract MultipleArbitrableTransactionWithFee is IArbitrable, IEvidence {
         if (!round.hasPaid[_side]) {
             reward = round.contributions[_beneficiary][_side];
         } else if (!round.hasPaid[_finalRuling]) {
-            // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+            // When the ultimate winner didn't fully pay appeal fees, proportionally reimburse unspent fees of the fully funded sides.
             // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
             reward = round.fundedSides.length > 1
                 ? (round.contributions[_beneficiary][_side] * round.feeRewards) /
@@ -1049,7 +1052,7 @@ contract MultipleArbitrableTransactionWithFee is IArbitrable, IEvidence {
             if (!round.hasPaid[uint256(_side)]) {
                 total += round.contributions[_beneficiary][uint256(_side)];
             } else if (!round.hasPaid[finalRuling]) {
-                // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+                // When the ultimate winner didn't fully pay appeal fees, proportionally reimburse unspent fees of the fully funded sides.
                 // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
                 total += round.fundedSides.length > 1
                 ? (round.contributions[_beneficiary][uint256(_side)] * round.feeRewards) /

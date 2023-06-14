@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
  *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
@@ -5,8 +7,7 @@
  *  @bounties: []
  */
 
-pragma solidity ^0.8;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.9;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
@@ -20,6 +21,11 @@ import "./libraries/CappedMath.sol";
  *  This can be used for buying goods, services and for paying freelancers.
  *  Parties are identified as "sender" and "receiver".
  *  This version of the contract supports appeal crowdfunding.
+ *  Note that the contract expects the tokens to have standard ERC20 behaviour.
+ *  The tokens that don't conform to this type of behaviour should be filtered by the UI.
+ *  Tokens should not reenter or allow recipients to refuse the transfer.
+ *  Also note that for ETH send() function is used deliberately instead of transfer() 
+ *  to avoid blocking the flow with reverting fallback.
  */
 contract MultipleArbitrableTokenTransactionWithAppeals is IArbitrable, IEvidence {
     using CappedMath for uint256;

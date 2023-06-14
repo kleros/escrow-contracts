@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz, @remedcu]
  *  @reviewers: []
@@ -5,8 +7,7 @@
  *  @bounties: []
  */
 
-pragma solidity ^0.8;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.9;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
@@ -21,6 +22,11 @@ import "./libraries/CappedMath.sol";
  *  Parties are identified as "sender" and "receiver".
  *  This version of the contract supports appeal crowdfunding and platform fees.
  *  A fee is associated with each successful payment to receiver.
+ *  Note that the contract expects the tokens to have standard ERC20 behaviour.
+ *  The tokens that don't conform to this type of behaviour should be filtered by the UI.
+ *  Tokens should not reenter or allow recipients to refuse the transfer.
+ *  Also note that for ETH send() function is used deliberately instead of transfer() 
+ *  to avoid blocking the flow with reverting fallback.
  */
 contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
     using CappedMath for uint256;
@@ -351,7 +357,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
 
         uint256 feeAmount = calculateFeeRecipientAmount(_amount);
         // Tokens should not reenter or allow recipients to refuse the transfer.
-        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+        require(
+            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+            "The `transfer` function must not fail."
+        );
 
         require(
             _transaction.token.transfer(_transaction.receiver, _amount - feeAmount),
@@ -409,7 +418,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction);
 
         uint256 feeAmount = calculateFeeRecipientAmount(amount);
-        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
+        require(
+            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+            "The `transfer` function must not fail."
+        );
 
         require(
             _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
@@ -498,7 +510,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
 
         uint256 feeAmount = calculateFeeRecipientAmount(settlementAmount);
-        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
+        require(
+            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+            "The `transfer` function must not fail."
+        );
 
         require(
             _transaction.token.transfer(_transaction.sender, remainingAmount),
@@ -691,7 +706,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         transactionHashes[_transactionID - 1] = hashTransactionState(_transaction); // solhint-disable-line
 
         uint256 feeAmount = calculateFeeRecipientAmount(amount);
-        _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
+        require(
+            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+            "The `transfer` function must not fail."
+        );
         require(
             _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
             "The `transfer` function must not fail."
@@ -878,7 +896,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         if (!round.hasPaid[_side]) {
             reward = round.contributions[_beneficiary][_side];
         } else if (!round.hasPaid[_finalRuling]) {
-            // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+            // When the ultimate winner didn't fully pay appeal fees, proportionally reimburse unspent fees of the fully funded sides.
             // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
             reward = round.fundedSides.length > 1
                 ? (round.contributions[_beneficiary][_side] * round.feeRewards) /
@@ -1037,7 +1055,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             if (settlementSender != 0) {
                 feeAmount = calculateFeeRecipientAmount(settlementSender);
                 // Tokens should not reenter or allow recipients to refuse the transfer.
-                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+                require(
+                    _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+                    "The `transfer` function must not fail."
+                );
                 require(
                     _transaction.token.transfer(_transaction.sender, amount - settlementSender),
                     "The `transfer` function must not fail."
@@ -1061,7 +1082,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             if (settlementReceiver != 0) {
                 feeAmount = calculateFeeRecipientAmount(settlementReceiver);
                 // Tokens should not reenter or allow recipients to refuse the transfer.
-                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount); // It is the responsibility of the feeRecipient to accept Token.
+                require(
+                    _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+                    "The `transfer` function must not fail."
+                );
                 require(
                     _transaction.token.transfer(_transaction.sender, amount - settlementReceiver),
                     "The `transfer` function must not fail."
@@ -1073,7 +1097,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
                 emit FeeRecipientPaymentInToken(_transactionID, feeAmount, _transaction.token);
             } else {
                 feeAmount = calculateFeeRecipientAmount(amount);
-                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
+                require(
+                    _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+                    "The `transfer` function must not fail."
+                );
                 require(
                     _transaction.token.transfer(_transaction.receiver, amount - feeAmount),
                     "The `transfer` function must not fail."
@@ -1090,7 +1117,10 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             uint256 splitAmount = amount / 2;
 
             feeAmount = calculateFeeRecipientAmount(splitAmount);
-            _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount);
+            require(
+                _transaction.token.transfer(feeRecipientData.feeRecipient, feeAmount),
+                "The `transfer` function must not fail."
+            );
             require(
                 _transaction.token.transfer(_transaction.receiver, splitAmount - feeAmount),
                 "The `transfer` function must not fail."
@@ -1143,7 +1173,7 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
             if (!round.hasPaid[uint256(_side)]) {
                 total += round.contributions[_beneficiary][uint256(_side)];
             } else if (!round.hasPaid[finalRuling]) {
-                // Reimburse unspent fees proportionally if the ultimate winner didn't pay appeal fees fully.
+                // When the ultimate winner didn't fully pay appeal fees, proportionally reimburse unspent fees of the fully funded sides.
                 // Note that if only one side is funded it will become a winner and this part of the condition won't be reached.
                 total += round.fundedSides.length > 1
                 ? (round.contributions[_beneficiary][uint256(_side)] * round.feeRewards) /
