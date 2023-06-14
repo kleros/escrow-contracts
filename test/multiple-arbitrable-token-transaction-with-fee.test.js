@@ -83,7 +83,6 @@ describe("MultipleArbitrableTokenTransactionWitFee contract", async () => {
       arbitratorExtraData,
       feeBeneficiaryAddress,
       feeShare,
-      [token.address],
       feeTimeout,
       settlementTimeout,
       sharedMultiplier,
@@ -130,10 +129,6 @@ describe("MultipleArbitrableTokenTransactionWitFee contract", async () => {
         feeBeneficiaryAddress,
         "feeRecipient address not properly set",
       );
-      expect(await contract.whitelisted(token.address)).to.equal(
-        true,
-        "Token not whitelisted",
-      );
     });
   });
 
@@ -147,12 +142,6 @@ describe("MultipleArbitrableTokenTransactionWitFee contract", async () => {
           .connect(sender)
           .createTransaction(5, token.address, timeoutPayment, receiverAddress, metaEvidence)
       ).to.be.revertedWith("Amount too low to pay fee.");
-
-      await expect(
-        contract
-          .connect(sender)
-          .createTransaction(amount, contract.address, timeoutPayment, receiverAddress, metaEvidence) // Use any other address to check whitelist
-      ).to.be.revertedWith("Token is not whitelisted");
 
       const txPromise = contract
         .connect(sender)
@@ -183,38 +172,7 @@ describe("MultipleArbitrableTokenTransactionWitFee contract", async () => {
         tokensAfter.contract,
         "Wrong contract balance",
       );
-    });
-    
-    it("Should check the whitelist", async () => {
-      const metaEvidence = metaEvidenceUri;
-      await contract
-          .connect(feeBeneficiary)
-          .changeWhitelist([token.address], false)
-
-      await expect(
-        contract
-          .connect(sender)
-          .createTransaction(amount, token.address, timeoutPayment, receiverAddress, metaEvidence)
-      ).to.be.revertedWith("Token is not whitelisted");
-
-      await expect(
-        contract
-          .connect(other)
-          .changeWhitelist([token.address], true)
-      ).to.be.revertedWith("The caller must be the current Fee Recipient");
-
-      await contract
-        .connect(feeBeneficiary)
-        .changeWhitelist([token.address], true)
-
-      const txPromise = contract
-        .connect(sender)
-        .createTransaction(amount, token.address, timeoutPayment, receiverAddress, metaEvidence);
-      
-        await expect(txPromise)
-        .to.emit(contract, "TransactionCreated")
-        .withArgs(1, senderAddress, receiverAddress, token.address, amount);
-    });
+    });   
 
     it("Should emit a correct TransactionStateUpdated event for the newly created transaction", async () => {
       currentTime = await latestTime();

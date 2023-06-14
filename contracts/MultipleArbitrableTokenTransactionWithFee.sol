@@ -115,9 +115,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
     /// @dev Stores the hashes of all transactions.
     bytes32[] public transactionHashes;
     
-    /// @dev Tokens that were whitelisted by deployer and feeRecipient.
-    mapping(IERC20 => bool) public whitelisted;
-
     /// @dev Maps a transactionID to its respective appeal rounds.
     mapping(uint256 => Round[]) public roundsByTransactionID;
 
@@ -160,12 +157,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _newFeeRecipientBasisPoint Current value of feeRecipientBasisPoint.
      */
     event FeeBasisPointChanged(uint16 _oldFeeRecipientBasisPoint, uint16 _newFeeRecipientBasisPoint);
-
-    /** @dev To be emitted when the whitelist was changed.
-     *  @param _token The token that was either added or removed from whitelist.
-     *  @param _allow Whether added or removed.
-     */
-    event WhitelistChanged(IERC20 _token, bool _allow);
 
     /** @dev Indicate that a party has to pay a fee or would otherwise be considered as losing.
      *  @param _transactionID The index of the transaction.
@@ -225,7 +216,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
      *  @param _arbitratorExtraData Extra data for the arbitrator.
      *  @param _feeRecipient Address which receives a share of receiver payment.
      *  @param _feeRecipientBasisPoint The share of fee to be received by the feeRecipient.
-     *  @param _whitelistedTokens Array of the default whitelisted tokens.
      *  @param _feeTimeout Arbitration fee timeout for the parties.
      *  @param _settlementTimeout Settlement timeout for the parties.
      *  @param _sharedStakeMultiplier Multiplier of the appeal cost that the
@@ -241,7 +231,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         bytes memory _arbitratorExtraData,
         address _feeRecipient,
         uint16 _feeRecipientBasisPoint,
-        IERC20[] memory _whitelistedTokens,
         uint256 _feeTimeout,
         uint256 _settlementTimeout,
         uint256 _sharedStakeMultiplier,
@@ -259,13 +248,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         sharedStakeMultiplier = _sharedStakeMultiplier;
         winnerStakeMultiplier = _winnerStakeMultiplier;
         loserStakeMultiplier = _loserStakeMultiplier;
-
-        IERC20 token;
-        for (uint256 i = 0; i < _whitelistedTokens.length; i++) {
-            token = _whitelistedTokens[i];
-            whitelisted[token] = true;
-            emit WhitelistChanged(token, true);
-        }
     }
 
     modifier onlyValidTransaction(uint256 _transactionID, Transaction memory _transaction) {
@@ -306,22 +288,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         feeRecipientData.feeRecipientBasisPoint = _newFeeRecipientBasisPoint;      
     }
 
-    /** @dev Add/remove tokens from whitelist.
-     *  @param _tokens Array of tokens.
-     *  @param _allow Whether to add or remove from whitelist.
-     */
-    function changeWhitelist(IERC20[] memory _tokens, bool _allow) external {
-        require(msg.sender == feeRecipientData.feeRecipient, "The caller must be the current Fee Recipient");
-        IERC20 token;
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            token = _tokens[i];
-            if (whitelisted[token] != _allow) {
-                whitelisted[token] = _allow;
-                emit WhitelistChanged(token, _allow);
-            }
-        }
-    }
-
     /** @dev Create a transaction. UNTRUSTED.
      *  @param _amount The amount of tokens in this transaction.
      *  @param _token The ERC20 token contract.
@@ -337,7 +303,6 @@ contract MultipleArbitrableTokenTransactionWitFee is IArbitrable, IEvidence {
         address payable _receiver,
         string calldata _metaEvidence
     ) external returns (uint256 transactionID) {
-        require(whitelisted[_token], "Token is not whitelisted");
         // Transfers token from sender wallet to contract.
         require(
             _token.transferFrom(msg.sender, address(this), _amount),
