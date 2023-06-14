@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@unknownunknown1, @fnanni-0, @shalzz]
  *  @reviewers: [@ferittuncer*, @epiqueras*, @nix1g*, @unknownunknown1, @alcercu*, @fnanni-0*]
@@ -5,14 +7,19 @@
  *  @bounties: []
  */
 
-pragma solidity ^0.8;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.9;
 
 import "@kleros/erc-792/contracts/IArbitrable.sol";
 import "@kleros/erc-792/contracts/IArbitrator.sol";
 import "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 import "./libraries/CappedMath.sol";
 
+/**
+ *  @title MultipleArbitrableTransactionWithAppeals
+ *  @dev Escrow contract with appeal support.
+ *  Note that send() function is used deliberately instead of transfer() 
+ *  to avoid blocking the flow with reverting fallback.
+ */
 contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
     using CappedMath for uint256;
     // **************************** //
@@ -436,7 +443,7 @@ contract MultipleArbitrableTransactionWithAppeals is IArbitrable, IEvidence {
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
         _transaction.senderFee += msg.value;
-        // Require that the total pay at least the arbitration cost.
+        // Require that the total paid to be at least the arbitration cost.
         require(
             _transaction.senderFee >= arbitrationCost,
             "The sender fee must cover arbitration costs."
